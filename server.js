@@ -5,6 +5,7 @@ const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 
 const authRouter = require("./routes/auth");
+const registerRouter = require('./routes/register');
 
 const app = express();
 const port = process.env.PORT;
@@ -13,6 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/auth", authRouter);
+app.use('/register', registerRouter);
 
 app.get('/', (req, res) => {
   res.send('Hello World.')

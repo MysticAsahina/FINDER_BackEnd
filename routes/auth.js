@@ -1,18 +1,134 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
 
 const router = express.Router();
 
+// OTP expires in 5 minutes
+const OTP_EXPIRY_MS = 5 * 60 * 1000
+
 // ---------------------------------------------------------------------------
 // OTP store
 // Keyed by userId (string) so multiple users can have active OTPs at once.
-// Each entry: { code, expiresAt }
+// Each entry: { code, expiresAt, attempts }
 // ---------------------------------------------------------------------------
 const otpStore = new Map();
 
-const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+// ---------------------------------------------------------------------------
+// Rate limiters
+// ---------------------------------------------------------------------------
+
+// Login: max 10 attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login attempts. Please try again in 15 minutes." },
+});
+
+// OTP submit: max 10 attempts per 5 minutes per IP
+const otpSubmitLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many OTP attempts. Please wait before trying again." },
+});
+
+// OTP resend: max 1 per 5 minutes per IP
+const otpResendLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 1,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many resend requests. Please wait before requesting another OTP." },
+});
+
+// ---------------------------------------------------------------------------
+// Field validators
+// Each function returns an error message string if invalid, null if valid.
+// ---------------------------------------------------------------------------
+
+function validateEmailFormat(email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) return "Invalid email format.";
+  return null;
+}
+
+function validateEmailLength(email) {
+  if (email.length > 254) return "Email is too long.";
+  return null;
+}
+
+function validatePasswordLength(password) {
+  // Upper cap prevents bcrypt DoS via oversized inputs
+  if (password.length > 128) return "Password is too long.";
+  return null;
+}
+
+function validateMobileFormat(mobileNumber) {
+  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
+  const mobileRegex = /^09\d{9}$/;
+  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Input sanitization
+// Calls the individual validators above and throws on any failure.
+// ---------------------------------------------------------------------------
+
+function sanitizeAdminLogin(body) {
+  let { email, password } = body;
+
+  if (typeof email !== "string" || typeof password !== "string") {
+    throw Object.assign(new Error("Invalid input types."), { status: 400 });
+  }
+
+  email    = email.trim().toLowerCase();
+  password = password.trim();
+
+  if (!email || !password) {
+    throw Object.assign(new Error("Email and password are required."), { status: 400 });
+  }
+
+  const emailFormatError  = validateEmailFormat(email);
+  if (emailFormatError)   throw Object.assign(new Error(emailFormatError),  { status: 400 });
+
+  const emailLengthError  = validateEmailLength(email);
+  if (emailLengthError)   throw Object.assign(new Error(emailLengthError),  { status: 400 });
+
+  const passwordLenError  = validatePasswordLength(password);
+  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
+
+  return { email, password };
+}
+
+function sanitizeMobileLogin(body) {
+  let { mobileNumber, password } = body;
+
+  if (typeof mobileNumber !== "string" || typeof password !== "string") {
+    throw Object.assign(new Error("Invalid input types."), { status: 400 });
+  }
+
+  mobileNumber = mobileNumber.trim();
+  password     = password.trim();
+
+  if (!mobileNumber || !password) {
+    throw Object.assign(new Error("Mobile number and password are required."), { status: 400 });
+  }
+
+  const mobileFormatError = validateMobileFormat(mobileNumber);
+  if (mobileFormatError)  throw Object.assign(new Error(mobileFormatError), { status: 400 });
+
+  const passwordLenError  = validatePasswordLength(password);
+  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
+
+  return { mobileNumber, password };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,27 +153,15 @@ function signPendingToken(user) {
 const invalidCredentials = (res) =>
   res.status(401).json({ message: "Invalid credentials." });
 
-// E.164 converter
-function toE164(mobileNumber) {
-  return mobileNumber.replace(/^0/, "+63");
-}
-
-/**
- * Generates a cryptographically random 6-digit OTP string.
- */
 function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
 }
 
-/**
- * Sends OTP via smsapiph and stores the code against the userId.
- * Overwrites any existing OTP for that user (handles resend).
- */
 async function sendOtp(userId, mobileNumber) {
-  const code = generateOtp();
+  const code      = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
 
-  /* This does not work right now, DO NOT USE:
+  /* TODO: replace with real SMS provider before production
   const response = await fetch("https://smsapiph.onrender.com/api/v1/send/sms", {
     method: "POST",
     headers: {
@@ -75,36 +179,30 @@ async function sendOtp(userId, mobileNumber) {
   if (!response.ok) {
     const err = new Error(data.message || "Failed to send OTP.");
     err.smsStatus = response.status;
-    err.smsCode = data.code;
+    err.smsCode   = data.code;
     throw err;
   }
   */
 
-  // TODO: replace with real SMS provider before production
   console.log(`[DEV OTP] code for ${mobileNumber}: ${code}`);
 
-  // Store after successful send — keyed by userId so each user is independent
   otpStore.set(String(userId), { code, expiresAt, attempts: 0 });
 }
 
-/**
- * Verifies a submitted code against the store.
- * Returns true on match, false otherwise.
- * Deletes the entry on any outcome (one-time use).
- */
 function verifyOtp(userId, submittedCode) {
-  const key = String(userId);
+  const key   = String(userId);
   const entry = otpStore.get(key);
 
   if (!entry) return false;
-  if (Date.now() > entry.expiresAt) return false;
+  if (Date.now() > entry.expiresAt) { otpStore.delete(key); return false; }
+
   if (submittedCode !== entry.code) {
     entry.attempts += 1;
     if (entry.attempts >= 3) otpStore.delete(key); // burn after 3 wrong attempts
     return false;
   }
 
-  otpStore.delete(key); // consume after correct OTP submission
+  otpStore.delete(key); // correct — consume it
   return true;
 }
 
@@ -113,13 +211,14 @@ function verifyOtp(userId, submittedCode) {
 // ---------------------------------------------------------------------------
 
 async function loginAdmin(req, res) {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required." });
+  let email, password;
+  try {
+    ({ email, password } = sanitizeAdminLogin(req.body));
+  } catch (err) {
+    return res.status(err.status || 400).json({ message: err.message });
   }
 
-  const user = await User.findOne({ email: email.toLowerCase(), role: "admin" });
+  const user = await User.findOne({ email, role: "admin" });
   if (!user) return invalidCredentials(res);
 
   const isMatch = await user.comparePassword(password);
@@ -134,10 +233,11 @@ async function loginAdmin(req, res) {
 }
 
 async function loginPassenger(req, res) {
-  const { mobileNumber, password } = req.body;
-
-  if (!mobileNumber || !password) {
-    return res.status(400).json({ message: "Mobile number and password are required." });
+  let mobileNumber, password;
+  try {
+    ({ mobileNumber, password } = sanitizeMobileLogin(req.body));
+  } catch (err) {
+    return res.status(err.status || 400).json({ message: err.message });
   }
 
   const user = await User.findOne({ mobileNumber, role: "passenger" });
@@ -155,10 +255,11 @@ async function loginPassenger(req, res) {
 }
 
 async function loginDriver(req, res) {
-  const { mobileNumber, password } = req.body;
-
-  if (!mobileNumber || !password) {
-    return res.status(400).json({ message: "Mobile number and password are required." });
+  let mobileNumber, password;
+  try {
+    ({ mobileNumber, password } = sanitizeMobileLogin(req.body));
+  } catch (err) {
+    return res.status(err.status || 400).json({ message: err.message });
   }
 
   const user = await User.findOne({ mobileNumber, role: "driver" });
@@ -186,7 +287,7 @@ const strategies = {
 };
 
 // POST /auth/login
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   const { role } = req.body;
 
   if (!role || !strategies[role]) {
@@ -205,9 +306,8 @@ router.post("/login", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /auth/resend-otp
-// Re-sends a fresh OTP. Requires the pending token.
 // ---------------------------------------------------------------------------
-router.post("/resend-otp", async (req, res) => {
+router.post("/resend-otp", otpResendLimiter, async (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -241,12 +341,12 @@ router.post("/resend-otp", async (req, res) => {
 // Body: { code }
 // Header: Authorization: Bearer <pendingToken>
 // ---------------------------------------------------------------------------
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
   const { code } = req.body;
   const authHeader = req.headers.authorization;
 
-  if (!code) {
-    return res.status(400).json({ message: "OTP code is required." });
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
   }
 
   if (!authHeader?.startsWith("Bearer ")) {
