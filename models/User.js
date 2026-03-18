@@ -85,42 +85,38 @@ userSchema.index({ "driverDetails.plateNumber": 1 },        { unique: true, spar
 // ---------------------------------------------------------------------------
 // Pre-save: role-based field validation
 // ---------------------------------------------------------------------------
-userSchema.pre("save", function (next) {
+userSchema.pre("save", async function () {
   // Admin must have an email
   if (this.role === "admin" && !this.email) {
-    return next(new Error("Admin accounts require an email address."));
+    throw new Error("Admin accounts require an email address.");
   }
 
   // Driver must supply driverDetails
   if (this.role === "driver" && !this.driverDetails) {
-    return next(new Error("Driver accounts require driverDetails."));
+    throw new Error("Driver accounts require driverDetails.");
   }
 
   // Non-drivers cannot carry driverDetails
   if (this.role !== "driver" && this.driverDetails) {
     this.driverDetails = null;
   }
-
-  next();
 });
 
 // ---------------------------------------------------------------------------
 // Pre-save: hash password
 // ---------------------------------------------------------------------------
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
   this.password = await bcrypt.hash(this.password, SALT_ROUNDS);
-  next();
 });
 
 // ---------------------------------------------------------------------------
 // Pre-save: hash mpin (driver only, optional)
 // ---------------------------------------------------------------------------
-userSchema.pre("save", async function (next) {
-  if (!this.driverDetails?.mpin) return next();
-  if (!this.isModified("driverDetails.mpin")) return next();
+userSchema.pre("save", async function () {
+  if (!this.driverDetails?.mpin) return;
+  if (!this.isModified("driverDetails.mpin")) return;
   this.driverDetails.mpin = await bcrypt.hash(this.driverDetails.mpin, SALT_ROUNDS);
-  next();
 });
 
 // ---------------------------------------------------------------------------
