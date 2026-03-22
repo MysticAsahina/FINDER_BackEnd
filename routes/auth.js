@@ -157,20 +157,28 @@ function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
 }
 
+// Converts number to E164 format, used for OTP
+function toE164(mobileNumber) {
+  return '+63' + mobileNumber.slice(1);
+}
+
 async function sendOtp(userId, mobileNumber) {
   const code      = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
+  const recipient = toE164(mobileNumber);
 
-  /* TODO: replace with real SMS provider before production
-  const response = await fetch("https://smsapiph.onrender.com/api/v1/send/sms", {
+  const apiUsername = process.env.SMS_GATE_USERNAME;
+  const apiPassword = process.env.SMS_GATE_PASSWORD;
+
+  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": process.env.SMSAPIPH_KEY,
+      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      recipient: mobileNumber,
-      message: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`,
+      phoneNumbers: [ recipient ],
+      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
     }),
   });
 
@@ -182,9 +190,6 @@ async function sendOtp(userId, mobileNumber) {
     err.smsCode   = data.code;
     throw err;
   }
-  */
-
-  console.log(`[DEV OTP] code for ${mobileNumber}: ${code}`);
 
   otpStore.set(String(userId), { code, expiresAt, attempts: 0 });
 }

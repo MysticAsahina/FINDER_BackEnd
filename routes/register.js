@@ -89,23 +89,39 @@ function signRegistrationToken(mobileNumber, stage) {
   );
 }
 
+// Converts number to E164 format, used for OTP
+function toE164(mobileNumber) {
+  return '+63' + mobileNumber.slice(1);
+}
+
 async function sendOtp(mobileNumber) {
   const code      = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
+  const recipient = toE164(mobileNumber);
 
-  /* TODO: replace with real SMS provider before production
-  const response = await fetch("...", {
+  const apiUsername = process.env.SMS_GATE_USERNAME;
+  const apiPassword = process.env.SMS_GATE_PASSWORD;
+
+  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
     method: "POST",
-    headers: { "x-api-key": process.env.SMSAPIPH_KEY, "Content-Type": "application/json" },
+    headers: {
+      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
-      recipient: mobileNumber,
-      message: `Your FINDER registration code is ${code}. It expires in 5 minutes.`,
+      phoneNumbers: [ recipient ],
+      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
     }),
   });
-  if (!response.ok) throw new Error("Failed to send OTP.");
-  */
 
-  console.log(`[DEV REG OTP] code for ${mobileNumber}: ${code}`);
+  const data = await response.json();
+
+  if (!response.ok) {
+    const err = new Error(data.message || "Failed to send OTP.");
+    err.smsStatus = response.status;
+    err.smsCode   = data.code;
+    throw err;
+  }
 
   // Keyed by mobileNumber — one pending registration per number at a time
   regOtpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });

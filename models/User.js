@@ -46,9 +46,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       lowercase: true,
-      default: null,
       // Required only for admin — enforced in the pre-save hook below.
-      // sparse: true on the index allows multiple null values.
+      // Intentionally no default — field must be absent (not null) on
+      // passenger/driver documents so the sparse unique index skips them.
     },
     mobileNumber: {
       type: String,
