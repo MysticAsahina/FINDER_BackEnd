@@ -1,14 +1,14 @@
-const express    = require("express");
-const rateLimit  = require("express-rate-limit");
+const express = require("express");
+const rateLimit = require("express-rate-limit");
 const cloudinary = require("cloudinary").v2;
-const bcrypt     = require("bcrypt");
+const bcrypt = require("bcrypt");
 const DriverApplication = require("../models/DriverApplication");
-const User       = require("../models/User");
+const User = require("../models/User");
 const { authenticate, requireRole } = require("../middleware/auth");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
@@ -59,6 +59,44 @@ async function deleteCloudinaryImages(application) {
   }
 }
 
+// Converts number to E164 format, used for OTP
+function toE164(mobileNumber) {
+  return '+63' + mobileNumber.slice(1);
+}
+
+/**
+ * Sends a notification to the driver via SMS.
+ */
+async function sendNotification(firstName, lastName, mobileNumber) {
+  try {
+    const apiUsername = process.env.SMS_GATE_USERNAME;
+    const apiPassword = process.env.SMS_GATE_PASSWORD;
+    const recipient = toE164(mobileNumber);
+
+    const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
+      method: "POST",
+      headers: {
+        "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        phoneNumbers: [recipient],
+        textMessage: { text: `${firstName} ${lastName}, your driver application has been approved. You can now log in to the app.` },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      console.log(`[adminApplications] Notification sent to ${mobileNumber}`);
+    } else {
+      console.error(`[adminApplications] Notification failed for ${mobileNumber}:`, data);
+    }
+  } catch (err) {
+    console.error(`[adminApplications] Notification error for ${mobileNumber}:`, err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GET /admin/applications
 // Returns a list of driver applications.
@@ -72,20 +110,20 @@ router.get("/", readLimiter, async (req, res) => {
   try {
     const status = req.query.status || "pending";
     const search = req.query.search?.trim() || "";
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(50, parseInt(req.query.limit) || 20);
-    const skip   = (page - 1) * limit;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
 
     const query = { status };
 
     if (search) {
       const regex = new RegExp(search, "i");
       query.$or = [
-        { firstName:     regex },
-        { lastName:      regex },
-        { mobileNumber:  regex },
+        { firstName: regex },
+        { lastName: regex },
+        { mobileNumber: regex },
         { licenseNumber: regex },
-        { plateNumber:   regex },
+        { plateNumber: regex },
       ];
     }
 
@@ -193,25 +231,25 @@ router.post("/:id/approve", actionLimiter, async (req, res) => {
     // by using $set via updateOne after creation. The cleanest approach is
     // to use insertOne via the Model bypassing hooks for these two fields.
     const userData = {
-      firstName:    application.firstName,
-      lastName:     application.lastName,
+      firstName: application.firstName,
+      lastName: application.lastName,
       mobileNumber: application.mobileNumber,
-      password:     application.password, // already hashed
-      role:         "driver",
+      password: application.password, // already hashed
+      role: "driver",
       driverDetails: {
-        licenseImgFront:  application.licenseImgFront,
-        licenseImgBack:   application.licenseImgBack,
-        licenseNumber:    application.licenseNumber,
-        licenseExpDate:   application.licenseExpDate,
-        faceImg:          application.faceImg,
-        idImg:            application.idImg,
-        tricycleOR:       application.tricycleOR,
-        regCert:          application.regCert,
+        licenseImgFront: application.licenseImgFront,
+        licenseImgBack: application.licenseImgBack,
+        licenseNumber: application.licenseNumber,
+        licenseExpDate: application.licenseExpDate,
+        faceImg: application.faceImg,
+        idImg: application.idImg,
+        tricycleOR: application.tricycleOR,
+        regCert: application.regCert,
         tricycleImgFront: application.tricycleImgFront,
-        tricycleImgBack:  application.tricycleImgBack,
-        motorcycleBrand:  application.motorcycleBrand,
-        plateNumber:      application.plateNumber,
-        mpin:             application.mpin, // already hashed or null
+        tricycleImgBack: application.tricycleImgBack,
+        motorcycleBrand: application.motorcycleBrand,
+        plateNumber: application.plateNumber,
+        mpin: application.mpin, // already hashed or null
       },
     };
 
@@ -225,6 +263,8 @@ router.post("/:id/approve", actionLimiter, async (req, res) => {
 
     // Remove the application — it is no longer needed
     await DriverApplication.findByIdAndDelete(application._id);
+
+    await sendNotification(application.firstName, application.lastName, application.mobileNumber);
 
     return res.status(200).json({ message: "Application approved. Driver account created." });
 
