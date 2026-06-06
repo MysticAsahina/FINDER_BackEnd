@@ -1,16 +1,16 @@
-const express   = require("express");
-const jwt       = require("jsonwebtoken");
-const crypto    = require("crypto");
+const express = require("express");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const cloudinary = require("cloudinary").v2;
-const cron      = require("node-cron");
+const cron = require("node-cron");
 const DriverApplication = require("../models/DriverApplication");
 const User = require("../models/User");
 
 // Configure Cloudinary from env
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
@@ -29,9 +29,9 @@ async function cleanupTempUploads() {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
     const result = await cloudinary.api.resources({
-      type:        "upload",
-      prefix:      "driver-applications/",
-      tags:        true,
+      type: "upload",
+      prefix: "driver-applications/",
+      tags: true,
       max_results: 500,
     });
 
@@ -80,10 +80,10 @@ const signatureLimiter = rateLimit({
   message: { message: "Too many upload requests. Please wait before trying again." },
 });
 
-// OTP send/resend: max 3 per 10 minutes per IP
+// OTP send/resend: max 10 per 10 minutes per IP
 const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many OTP requests. Please wait before trying again." },
@@ -109,7 +109,7 @@ function validateMobileFormat(mobileNumber) {
 }
 
 function validatePasswordLength(password) {
-  if (password.length < 8)   return "Password must be at least 8 characters.";
+  if (password.length < 8) return "Password must be at least 8 characters.";
   if (password.length > 128) return "Password is too long.";
   return null;
 }
@@ -153,7 +153,7 @@ function validateMotorcycleBrand(value) {
 function validateLicenseExpDate(value) {
   const date = new Date(value);
   if (isNaN(date.getTime())) return "Invalid license expiration date.";
-  if (date < new Date())     return "License expiration date must be in the future.";
+  if (date < new Date()) return "License expiration date must be in the future.";
   return null;
 }
 
@@ -179,7 +179,7 @@ function toE164(mobileNumber) {
 }
 
 async function sendOtp(mobileNumber) {
-  const code      = generateOtp();
+  const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
   const recipient = toE164(mobileNumber);
 
@@ -193,8 +193,8 @@ async function sendOtp(mobileNumber) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      phoneNumbers: [ recipient ],
-      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
+      phoneNumbers: [recipient],
+      textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
     }),
   });
 
@@ -203,7 +203,7 @@ async function sendOtp(mobileNumber) {
   if (!response.ok) {
     const err = new Error(data.message || "Failed to send OTP.");
     err.smsStatus = response.status;
-    err.smsCode   = data.code;
+    err.smsCode = data.code;
     throw err;
   }
 
@@ -218,7 +218,7 @@ function verifyOtp(mobileNumber, submittedCode) {
 
   if (submittedCode !== entry.code) {
     entry.attempts += 1;
-    if (entry.attempts >= 3) otpStore.delete(mobileNumber);
+    if (entry.attempts >= 10) otpStore.delete(mobileNumber);
     return false;
   }
 
@@ -235,25 +235,25 @@ router.post("/send-otp", otpLimiter, async (req, res) => {
   let { firstName, lastName, mobileNumber } = req.body;
 
   if (
-    typeof firstName    !== "string" ||
-    typeof lastName     !== "string" ||
+    typeof firstName !== "string" ||
+    typeof lastName !== "string" ||
     typeof mobileNumber !== "string"
   ) {
     return res.status(400).json({ message: "Invalid input types." });
   }
 
-  firstName    = firstName.trim();
-  lastName     = lastName.trim();
+  firstName = firstName.trim();
+  lastName = lastName.trim();
   mobileNumber = mobileNumber.trim();
 
-  const firstNameError  = validateName(firstName, "First name");
-  if (firstNameError)   return res.status(400).json({ message: firstNameError });
+  const firstNameError = validateName(firstName, "First name");
+  if (firstNameError) return res.status(400).json({ message: firstNameError });
 
-  const lastNameError   = validateName(lastName, "Last name");
-  if (lastNameError)    return res.status(400).json({ message: lastNameError });
+  const lastNameError = validateName(lastName, "Last name");
+  if (lastNameError) return res.status(400).json({ message: lastNameError });
 
-  const mobileError     = validateMobileFormat(mobileNumber);
-  if (mobileError)      return res.status(400).json({ message: mobileError });
+  const mobileError = validateMobileFormat(mobileNumber);
+  if (mobileError) return res.status(400).json({ message: mobileError });
 
   try {
     // Block if number already has a pending application
@@ -396,8 +396,8 @@ router.post("/cloudinary-signature", signatureLimiter, async (req, res) => {
     }
 
     const timestamp = Math.round(Date.now() / 1000);
-    const folder    = "driver-applications";
-    const tags      = "driver-reg-temp";
+    const folder = "driver-applications";
+    const tags = "driver-reg-temp";
 
     const signature = cloudinary.utils.api_sign_request(
       { timestamp, folder, tags },
@@ -410,7 +410,7 @@ router.post("/cloudinary-signature", signatureLimiter, async (req, res) => {
       folder,
       tags,
       cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-      apiKey:    process.env.CLOUDINARY_API_KEY,
+      apiKey: process.env.CLOUDINARY_API_KEY,
     });
   } catch (err) {
     if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
@@ -499,16 +499,16 @@ router.post("/submit", submitLimiter, async (req, res) => {
     if (licenseNumberError) return res.status(400).json({ message: licenseNumberError });
 
     const licenseExpError = validateLicenseExpDate(licenseExpDate);
-    if (licenseExpError)   return res.status(400).json({ message: licenseExpError });
+    if (licenseExpError) return res.status(400).json({ message: licenseExpError });
 
     const plateError = validatePlateNumber(plateNumber);
-    if (plateError)   return res.status(400).json({ message: plateError });
+    if (plateError) return res.status(400).json({ message: plateError });
 
     const brandError = validateMotorcycleBrand(motorcycleBrand);
-    if (brandError)   return res.status(400).json({ message: brandError });
+    if (brandError) return res.status(400).json({ message: brandError });
 
     const passwordError = validatePasswordLength(password.trim());
-    if (passwordError)  return res.status(400).json({ message: passwordError });
+    if (passwordError) return res.status(400).json({ message: passwordError });
 
     if (password.trim() !== confirmPassword.trim()) {
       return res.status(400).json({ message: "Passwords do not match." });
@@ -555,23 +555,23 @@ router.post("/submit", submitLimiter, async (req, res) => {
     // --- Save application ---
     // Password and mpin are hashed by DriverApplication pre-save hooks
     const application = new DriverApplication({
-      firstName:    decoded.firstName,
-      lastName:     decoded.lastName,
+      firstName: decoded.firstName,
+      lastName: decoded.lastName,
       mobileNumber: decoded.mobileNumber,
       licenseImgFront,
       licenseImgBack,
-      licenseNumber:    licenseNumber.trim(),
-      licenseExpDate:   new Date(licenseExpDate),
+      licenseNumber: licenseNumber.trim(),
+      licenseExpDate: new Date(licenseExpDate),
       faceImg,
       idImg,
       tricycleOR,
       regCert,
       tricycleImgFront,
       tricycleImgBack,
-      motorcycleBrand:  motorcycleBrand.trim(),
-      plateNumber:      plateNumber.trim().toUpperCase(),
-      password:         password.trim(),
-      mpin:             (mpin && mpin.trim()) ? mpin.trim() : null,
+      motorcycleBrand: motorcycleBrand.trim(),
+      plateNumber: plateNumber.trim().toUpperCase(),
+      password: password.trim(),
+      mpin: (mpin && mpin.trim()) ? mpin.trim() : null,
       cloudinaryPublicIds: cloudinaryPublicIds ?? {},
     });
 

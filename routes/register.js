@@ -18,10 +18,10 @@ const regOtpStore = new Map();
 // Rate limiters
 // ---------------------------------------------------------------------------
 
-// Send OTP: max 3 per 10 minutes per IP
+// Send OTP: max 10 per 10 minutes per IP
 const sendOtpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many OTP requests. Please wait before trying again." },
@@ -57,7 +57,7 @@ function validateMobileFormat(mobileNumber) {
 }
 
 function validatePasswordLength(password) {
-  if (password.length < 8)   return "Password must be at least 8 characters.";
+  if (password.length < 8) return "Password must be at least 8 characters.";
   if (password.length > 128) return "Password is too long.";
   return null;
 }
@@ -95,7 +95,7 @@ function toE164(mobileNumber) {
 }
 
 async function sendOtp(mobileNumber) {
-  const code      = generateOtp();
+  const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
   const recipient = toE164(mobileNumber);
 
@@ -109,8 +109,8 @@ async function sendOtp(mobileNumber) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      phoneNumbers: [ recipient ],
-      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
+      phoneNumbers: [recipient],
+      textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
     }),
   });
 
@@ -119,7 +119,7 @@ async function sendOtp(mobileNumber) {
   if (!response.ok) {
     const err = new Error(data.message || "Failed to send OTP.");
     err.smsStatus = response.status;
-    err.smsCode   = data.code;
+    err.smsCode = data.code;
     throw err;
   }
 
@@ -135,7 +135,7 @@ function verifyOtp(mobileNumber, submittedCode) {
 
   if (submittedCode !== entry.code) {
     entry.attempts += 1;
-    if (entry.attempts >= 3) regOtpStore.delete(mobileNumber);
+    if (entry.attempts >= 10) regOtpStore.delete(mobileNumber);
     return false;
   }
 
@@ -278,16 +278,16 @@ router.post("/complete", completeLimiter, async (req, res) => {
 
     if (
       typeof firstName !== "string" ||
-      typeof lastName  !== "string" ||
-      typeof password  !== "string" ||
+      typeof lastName !== "string" ||
+      typeof password !== "string" ||
       typeof confirmPassword !== "string"
     ) {
       return res.status(400).json({ message: "Invalid input types." });
     }
 
     firstName = firstName.trim();
-    lastName  = lastName.trim();
-    password  = password.trim();
+    lastName = lastName.trim();
+    password = password.trim();
 
     const firstNameError = validateName(firstName, "First name");
     if (firstNameError) return res.status(400).json({ message: firstNameError });
