@@ -88,21 +88,21 @@ function sanitizeAdminLogin(body) {
     throw Object.assign(new Error("Invalid input types."), { status: 400 });
   }
 
-  email = email.trim().toLowerCase();
+  email    = email.trim().toLowerCase();
   password = password.trim();
 
   if (!email || !password) {
     throw Object.assign(new Error("Email and password are required."), { status: 400 });
   }
 
-  const emailFormatError = validateEmailFormat(email);
-  if (emailFormatError) throw Object.assign(new Error(emailFormatError), { status: 400 });
+  const emailFormatError  = validateEmailFormat(email);
+  if (emailFormatError)   throw Object.assign(new Error(emailFormatError),  { status: 400 });
 
-  const emailLengthError = validateEmailLength(email);
-  if (emailLengthError) throw Object.assign(new Error(emailLengthError), { status: 400 });
+  const emailLengthError  = validateEmailLength(email);
+  if (emailLengthError)   throw Object.assign(new Error(emailLengthError),  { status: 400 });
 
-  const passwordLenError = validatePasswordLength(password);
-  if (passwordLenError) throw Object.assign(new Error(passwordLenError), { status: 400 });
+  const passwordLenError  = validatePasswordLength(password);
+  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
 
   return { email, password };
 }
@@ -115,17 +115,17 @@ function sanitizeMobileLogin(body) {
   }
 
   mobileNumber = mobileNumber.trim();
-  password = password.trim();
+  password     = password.trim();
 
   if (!mobileNumber || !password) {
     throw Object.assign(new Error("Mobile number and password are required."), { status: 400 });
   }
 
   const mobileFormatError = validateMobileFormat(mobileNumber);
-  if (mobileFormatError) throw Object.assign(new Error(mobileFormatError), { status: 400 });
+  if (mobileFormatError)  throw Object.assign(new Error(mobileFormatError), { status: 400 });
 
-  const passwordLenError = validatePasswordLength(password);
-  if (passwordLenError) throw Object.assign(new Error(passwordLenError), { status: 400 });
+  const passwordLenError  = validatePasswordLength(password);
+  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
 
   return { mobileNumber, password };
 }
@@ -134,17 +134,17 @@ function sanitizeMobileLogin(body) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function signToken(user) {
+function signToken(user, rememberMe = false) {
   return jwt.sign(
     { id: user._id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || "24h" }
+    { expiresIn: rememberMe ? "7d" : (process.env.JWT_EXPIRES_IN || "24h") }
   );
 }
 
-function signPendingToken(user) {
+function signPendingToken(user, rememberMe = false) {
   return jwt.sign(
-    { id: user._id, role: user.role, pending: true },
+    { id: user._id, role: user.role, pending: true, rememberMe: !!rememberMe },
     process.env.JWT_SECRET,
     { expiresIn: "10m" }
   );
@@ -155,11 +155,6 @@ const invalidCredentials = (res) =>
 
 function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
-}
-
-// Converts number to E164 format, used for OTP
-function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
 }
 
 async function sendOtp(userId, mobileNumber) {
@@ -198,7 +193,7 @@ async function sendOtp(userId, mobileNumber) {
 }
 
 function verifyOtp(userId, submittedCode) {
-  const key = String(userId);
+  const key   = String(userId);
   const entry = otpStore.get(key);
 
   if (!entry) return false;
@@ -254,10 +249,11 @@ async function loginPassenger(req, res) {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) return invalidCredentials(res);
 
+  const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
 
   return res.status(200).json({
-    pendingToken: signPendingToken(user),
+    pendingToken: signPendingToken(user, rememberMe),
     message: "Credentials verified. OTP sent to your registered mobile number.",
   });
 }
@@ -289,9 +285,9 @@ async function loginDriver(req, res) {
 // ---------------------------------------------------------------------------
 
 const strategies = {
-  admin: loginAdmin,
+  admin:     loginAdmin,
   passenger: loginPassenger,
-  driver: loginDriver,
+  driver:    loginDriver,
 };
 
 // POST /auth/login
@@ -376,7 +372,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       return res.status(401).json({ message: "Invalid or expired OTP." });
     }
 
-    const token = signToken(user);
+    const token = signToken(user, decoded.rememberMe);
 
     const userPayload = {
       id: user._id,
@@ -386,7 +382,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       mobileNumber: user.mobileNumber,
     };
 
-    if (user.role === "admin") userPayload.email = user.email;
+    if (user.role === "admin")  userPayload.email   = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
     return res.status(200).json({ token, user: userPayload });
