@@ -83,7 +83,7 @@ const signatureLimiter = rateLimit({
 // OTP send/resend: max 3 per 10 minutes per IP
 const otpLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 3,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many OTP requests. Please wait before trying again." },
@@ -186,6 +186,7 @@ async function sendOtp(mobileNumber) {
   const apiUsername = process.env.SMS_GATE_USERNAME;
   const apiPassword = process.env.SMS_GATE_PASSWORD;
 
+  /* Temporary remove due to lack of load
   const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
     method: "POST",
     headers: {
@@ -196,8 +197,9 @@ async function sendOtp(mobileNumber) {
       phoneNumbers: [ recipient ],
       textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
     }),
-  });
+  }); */
 
+  console.log("Code: " + code);
   const data = await response.json();
 
   if (!response.ok) {
