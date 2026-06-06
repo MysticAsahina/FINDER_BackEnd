@@ -88,21 +88,21 @@ function sanitizeAdminLogin(body) {
     throw Object.assign(new Error("Invalid input types."), { status: 400 });
   }
 
-  email    = email.trim().toLowerCase();
+  email = email.trim().toLowerCase();
   password = password.trim();
 
   if (!email || !password) {
     throw Object.assign(new Error("Email and password are required."), { status: 400 });
   }
 
-  const emailFormatError  = validateEmailFormat(email);
-  if (emailFormatError)   throw Object.assign(new Error(emailFormatError),  { status: 400 });
+  const emailFormatError = validateEmailFormat(email);
+  if (emailFormatError) throw Object.assign(new Error(emailFormatError), { status: 400 });
 
-  const emailLengthError  = validateEmailLength(email);
-  if (emailLengthError)   throw Object.assign(new Error(emailLengthError),  { status: 400 });
+  const emailLengthError = validateEmailLength(email);
+  if (emailLengthError) throw Object.assign(new Error(emailLengthError), { status: 400 });
 
-  const passwordLenError  = validatePasswordLength(password);
-  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
+  const passwordLenError = validatePasswordLength(password);
+  if (passwordLenError) throw Object.assign(new Error(passwordLenError), { status: 400 });
 
   return { email, password };
 }
@@ -115,17 +115,17 @@ function sanitizeMobileLogin(body) {
   }
 
   mobileNumber = mobileNumber.trim();
-  password     = password.trim();
+  password = password.trim();
 
   if (!mobileNumber || !password) {
     throw Object.assign(new Error("Mobile number and password are required."), { status: 400 });
   }
 
   const mobileFormatError = validateMobileFormat(mobileNumber);
-  if (mobileFormatError)  throw Object.assign(new Error(mobileFormatError), { status: 400 });
+  if (mobileFormatError) throw Object.assign(new Error(mobileFormatError), { status: 400 });
 
-  const passwordLenError  = validatePasswordLength(password);
-  if (passwordLenError)   throw Object.assign(new Error(passwordLenError),  { status: 400 });
+  const passwordLenError = validatePasswordLength(password);
+  if (passwordLenError) throw Object.assign(new Error(passwordLenError), { status: 400 });
 
   return { mobileNumber, password };
 }
@@ -163,7 +163,7 @@ function toE164(mobileNumber) {
 }
 
 async function sendOtp(userId, mobileNumber) {
-  const code      = generateOtp();
+  const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
   const recipient = toE164(mobileNumber);
 
@@ -181,7 +181,7 @@ async function sendOtp(userId, mobileNumber) {
       phoneNumbers: [ recipient ],
       textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
     }),
-  }); */
+  });
 
   console.log("Code: " + code);
   const data = await response.json();
@@ -191,13 +191,14 @@ async function sendOtp(userId, mobileNumber) {
     err.smsStatus = response.status;
     err.smsCode   = data.code;
     throw err;
-  }
+  } */
 
+  console.log("Code: " + code);
   otpStore.set(String(userId), { code, expiresAt, attempts: 0 });
 }
 
 function verifyOtp(userId, submittedCode) {
-  const key   = String(userId);
+  const key = String(userId);
   const entry = otpStore.get(key);
 
   if (!entry) return false;
@@ -288,9 +289,9 @@ async function loginDriver(req, res) {
 // ---------------------------------------------------------------------------
 
 const strategies = {
-  admin:     loginAdmin,
+  admin: loginAdmin,
   passenger: loginPassenger,
-  driver:    loginDriver,
+  driver: loginDriver,
 };
 
 // POST /auth/login
@@ -385,7 +386,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       mobileNumber: user.mobileNumber,
     };
 
-    if (user.role === "admin")  userPayload.email   = user.email;
+    if (user.role === "admin") userPayload.email = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
     return res.status(200).json({ token, user: userPayload });

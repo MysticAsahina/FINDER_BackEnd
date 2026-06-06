@@ -113,7 +113,7 @@ async function sendOtp(mobileNumber) {
       phoneNumbers: [recipient],
       textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
     }),
-  }); */
+  });
 
   console.log("Code: " + code);
   const data = await response.json();
@@ -123,9 +123,10 @@ async function sendOtp(mobileNumber) {
     err.smsStatus = response.status;
     err.smsCode = data.code;
     throw err;
-  }
+  } */
 
   // Keyed by mobileNumber — one pending registration per number at a time
+  console.log("Code: " + code);
   regOtpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
 }
 

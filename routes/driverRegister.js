@@ -197,9 +197,8 @@ async function sendOtp(mobileNumber) {
       phoneNumbers: [recipient],
       textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
     }),
-  }); */
+  });
 
-  console.log("Code: " + code);
   const data = await response.json();
 
   if (!response.ok) {
@@ -207,8 +206,9 @@ async function sendOtp(mobileNumber) {
     err.smsStatus = response.status;
     err.smsCode = data.code;
     throw err;
-  }
+  } */
 
+  console.log("Code: " + code);
   otpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
 }
 
