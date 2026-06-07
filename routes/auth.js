@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const crypto = require("crypto");
 
 const router = express.Router();
 
@@ -134,20 +135,32 @@ function sanitizeMobileLogin(body) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function signToken(user, rememberMe = false) {
+function signAccessToken(user) {
   return jwt.sign(
     { id: user._id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: rememberMe ? "7d" : (process.env.JWT_EXPIRES_IN || "24h") }
+    process.env.ACCESS_SECRET,
+    { expiresIn: "15m" }
+  );
+}
+
+function signRefreshToken(user, rememberMe = false) {
+  return jwt.sign(
+    { id: user._id },
+    process.env.REFRESH_SECRET,
+    { expiresIn: rememberMe ? process.env.EXPIRY_REMEMBER : process.env.EXPIRY_REGULAR }
   );
 }
 
 function signPendingToken(user, rememberMe = false) {
   return jwt.sign(
     { id: user._id, role: user.role, pending: true, rememberMe: !!rememberMe },
-    process.env.JWT_SECRET,
+    process.env.PENDING_SECRET,
     { expiresIn: "10m" }
   );
+}
+
+function hashToken (token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 const invalidCredentials = (res) =>
@@ -155,6 +168,11 @@ const invalidCredentials = (res) =>
 
 function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
+}
+
+// Converts number to E164 format, used for OTP
+function toE164(mobileNumber) {
+  return '+63' + mobileNumber.slice(1);
 }
 
 async function sendOtp(userId, mobileNumber) {
@@ -319,7 +337,7 @@ router.post("/resend-otp", otpResendLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.PENDING_SECRET);
 
     if (!decoded.pending) {
       return res.status(400).json({ message: "A pending token is required." });
@@ -358,7 +376,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.PENDING_SECRET);
 
     if (!decoded.pending) {
       return res.status(400).json({ message: "A pending token is required." });
@@ -372,7 +390,11 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       return res.status(401).json({ message: "Invalid or expired OTP." });
     }
 
-    const token = signToken(user, decoded.rememberMe);
+    const accessToken = signAccessToken(user);
+    const refreshToken = signRefreshToken(user, decoded.rememberMe);
+
+    user.refreshToken = hashToken(refreshToken);
+    await user.save();
 
     const userPayload = {
       id: user._id,
@@ -385,7 +407,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
     if (user.role === "admin")  userPayload.email   = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
-    return res.status(200).json({ token, user: userPayload });
+    return res.status(200).json({ accessToken, refreshToken, user: userPayload });
 
   } catch (err) {
     if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
@@ -412,7 +434,7 @@ router.post("/verify-mpin", async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
 
     if (decoded.pending) {
       return res.status(401).json({ message: "Complete OTP verification first." });
@@ -435,6 +457,71 @@ router.post("/verify-mpin", async (req, res) => {
     }
     console.error("[auth/verify-mpin]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/refresh
+// ---------------------------------------------------------------------------
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        message: "Refresh token required"
+      });
+    }
+
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.REFRESH_SECRET
+    );
+
+    const user = await User.findById(decoded.id);
+
+    if (!user || user.refreshToken !== hashToken(refreshToken)) {
+      return res.status(401).json({
+        message: "Invalid refresh token"
+      });
+    }
+
+    const accessToken = signAccessToken(user);
+
+    const userPayload = {
+        id: user._id,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        mobileNumber: user.mobileNumber,
+    };
+
+    if (user.role === "admin")  userPayload.email   = user.email;
+    if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
+
+    return res.json({ accessToken, user: userPayload });
+
+  } catch {
+    return res.status(401).json({
+      message: "Invalid or expired refresh token"
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/logout
+// ---------------------------------------------------------------------------
+router.post("/logout", async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ message: "Refresh token required." });
+
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
+    await User.findByIdAndUpdate(decoded.id, { refreshToken: null });
+    return res.status(200).json({ message: "Logged out." });
+  } catch {
+    // Even if the token is expired/invalid, treat as logged out
+    return res.status(200).json({ message: "Logged out." });
   }
 });
 

@@ -168,7 +168,7 @@ function generateOtp() {
 function signDriverRegToken(firstName, lastName, mobileNumber) {
   return jwt.sign(
     { firstName, lastName, mobileNumber, type: "driver-registration" },
-    process.env.JWT_SECRET,
+    process.env.REGISTER_SECRET,
     { expiresIn: "2h" } // longer window — multi-screen flow takes time
   );
 }
@@ -280,7 +280,7 @@ router.post("/send-otp", otpLimiter, async (req, res) => {
     // Embed personal info in the token so it carries forward
     const token = jwt.sign(
       { firstName, lastName, mobileNumber, type: "driver-registration" },
-      process.env.JWT_SECRET,
+      process.env.REGISTER_SECRET,
       { expiresIn: "2h" }
     );
 
@@ -306,7 +306,7 @@ router.post("/resend-otp", otpLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "driver-registration") {
       return res.status(400).json({ message: "Invalid token." });
@@ -348,7 +348,7 @@ router.post("/verify-otp", rateLimit({
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "driver-registration") {
       return res.status(400).json({ message: "Invalid token." });
@@ -391,7 +391,7 @@ router.post("/cloudinary-signature", signatureLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "driver-registration") {
       return res.status(400).json({ message: "Invalid token." });
@@ -437,7 +437,7 @@ router.post("/submit", submitLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "driver-registration") {
       return res.status(400).json({ message: "Invalid token." });

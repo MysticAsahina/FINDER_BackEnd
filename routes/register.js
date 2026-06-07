@@ -84,7 +84,7 @@ function generateOtp() {
 function signRegistrationToken(mobileNumber, stage) {
   return jwt.sign(
     { mobileNumber, stage, type: "registration" },
-    process.env.JWT_SECRET,
+    process.env.REGISTER_SECRET,
     { expiresIn: "15m" }
   );
 }
@@ -193,7 +193,7 @@ router.post("/resend-otp", sendOtpLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "registration" || decoded.stage !== "otp") {
       return res.status(400).json({ message: "Invalid registration token." });
@@ -233,7 +233,7 @@ router.post("/verify-otp", verifyOtpLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "registration" || decoded.stage !== "otp") {
       return res.status(400).json({ message: "Invalid registration token." });
@@ -271,7 +271,7 @@ router.post("/complete", completeLimiter, async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.REGISTER_SECRET);
 
     if (decoded.type !== "registration" || decoded.stage !== "complete") {
       return res.status(400).json({ message: "Invalid registration token." });
