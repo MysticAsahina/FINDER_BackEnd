@@ -2,9 +2,9 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const cloudinary = require("cloudinary").v2;
 const bcrypt = require("bcrypt");
-const DriverApplication = require("../models/DriverApplication");
-const User = require("../models/User");
-const { authenticate, requireRole } = require("../middleware/auth");
+const DriverApplication = require("../../models/DriverApplication");
+const User = require("../../models/User");
+const { authenticate, requireRole } = require("../../middleware/auth");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,

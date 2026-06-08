@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 const authRouter             = require("./routes/auth");
 const registerRouter         = require('./routes/register');
 const driverRegisterRouter   = require('./routes/driverRegister');
-const adminApplicationsRouter = require('./routes/adminApplications');
+const adminApplicationsRouter = require('./routes/admin/adminApplications');
 
 const app  = express();
 const port = process.env.PORT;
