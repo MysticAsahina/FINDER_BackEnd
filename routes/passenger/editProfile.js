@@ -1,7 +1,8 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
-const User = require("../models/User");
+const User = require("../../models/User");
+const { authenticate, requireRole } = require("../../middleware/auth");
 
 const router = express.Router();
 
@@ -55,50 +56,52 @@ const editProfileLimiter = rateLimit({
 });
 
 router.post("/", editProfileLimiter, async (req, res) => {
-    const authHeader = req.headers.authorization;
-    const { firstName, lastName, email, mobileNumber } = req.body;
+  const authHeader = req.headers.authorization;
+  const { firstName, lastName, email, mobileNumber } = req.body;
 
-    if (!authHeader?.startsWith("Bearer ")) {
-        return res.status(401).json({ message: "No token provided." });
-    }
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
 
-    if (!firstName || !lastName || !mobileNumber) {
+  if (!firstName || !lastName || !mobileNumber) {
     return res.status(400).json({
-        message: "Required fields are missing."
+      message: "Required fields are missing."
     });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
+
+    if (decoded.role !== "passenger") {
+      return res.status(403).json({ message: "Unauthorized." });
     }
 
-    try {
-        const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
+    const updateData = {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      mobileNumber: mobileNumber.trim(),
+    };
 
-        if (decoded.role !== "passenger") {
-        return res.status(403).json({ message: "Unauthorized." });
-        }
-
-        const updateData = {
-            firstName: firstName.trim(),
-            lastName: lastName.trim(),
-            mobileNumber: mobileNumber.trim(),
-        };
-
-        if (email?.trim()) {
-            updateData.email = email.trim();
-        }
-
-        const updatedUser = await User.findByIdAndUpdate(decoded.id, updateData, { new: true, runValidators: true });
-
-        return res.status(200).json({
-            message: "Profile updated successfully.",
-            user: {
-                id: updatedUser._id,
-                role: updatedUser.role,
-                firstName: updatedUser.firstName,
-                lastName: updatedUser.lastName,
-                email: updatedUser.email,
-                mobileNumber: updatedUser.mobileNumber
-            }
-        });
-    } catch {
-        return res.status(401).json({ message: "Invalid token." });
+    if (email?.trim()) {
+      updateData.email = email.trim();
     }
+
+    const updatedUser = await User.findByIdAndUpdate(decoded.id, updateData, { new: true, runValidators: true });
+
+    return res.status(200).json({
+      message: "Profile updated successfully.",
+      user: {
+        id: updatedUser._id,
+        role: updatedUser.role,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        email: updatedUser.email,
+        mobileNumber: updatedUser.mobileNumber
+      }
+    });
+  } catch {
+    return res.status(401).json({ message: "Invalid token." });
+  }
 });
+
+module.exports = router;
