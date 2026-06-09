@@ -144,7 +144,7 @@ function signAccessToken(user) {
 
 function signRefreshToken(user, rememberMe = false) {
   return jwt.sign(
-    { id: user._id },
+    { id: user._id, rememberMe: !!rememberMe },
     process.env.REFRESH_SECRET,
     { expiresIn: rememberMe ? process.env.EXPIRY_REMEMBER : process.env.EXPIRY_REGULAR }
   );
@@ -289,10 +289,11 @@ async function loginDriver(req, res) {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) return invalidCredentials(res);
 
+  const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
 
   return res.status(200).json({
-    pendingToken: signPendingToken(user),
+    pendingToken: signPendingToken(user, rememberMe),
     message: "Credentials verified. OTP sent to your registered mobile number.",
   });
 }
@@ -414,6 +415,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
     }
     console.error("[auth/verify-otp]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
+    console.log(err);
   }
 });
 
@@ -486,6 +488,10 @@ router.post("/refresh", async (req, res) => {
     }
 
     const accessToken = signAccessToken(user);
+    const newRefreshToken = signRefreshToken(user, decoded.rememberMe);
+
+    user.refreshToken = hashToken(newRefreshToken);
+    await user.save();
 
     const userPayload = {
         id: user._id,
@@ -498,7 +504,7 @@ router.post("/refresh", async (req, res) => {
     if (user.role === "admin")  userPayload.email   = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
-    return res.json({ accessToken, user: userPayload });
+    return res.json({ accessToken, refreshToken: newRefreshToken, user: userPayload });
 
   } catch {
     return res.status(401).json({

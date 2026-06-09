@@ -1,7 +1,7 @@
 const express = require("express");
-const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
 const User = require("../../models/User");
+const jwt = require("jsonwebtoken");
 const { authenticate, requireRole } = require("../../middleware/auth");
 
 const router = express.Router();
@@ -55,27 +55,14 @@ const editProfileLimiter = rateLimit({
   message: { message: "Too many edit profile attempts. Please try again in 15 minutes." },
 });
 
-router.post("/", editProfileLimiter, async (req, res) => {
-  const authHeader = req.headers.authorization;
+router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), async (req, res) => {
   const { firstName, lastName, email, mobileNumber } = req.body;
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided." });
-  }
 
   if (!firstName || !lastName || !mobileNumber) {
     return res.status(400).json({
       message: "Required fields are missing."
     });
   }
-
-  try {
-    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
-
-    if (decoded.role !== "passenger") {
-      return res.status(403).json({ message: "Unauthorized." });
-    }
-
     const updateData = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -86,7 +73,7 @@ router.post("/", editProfileLimiter, async (req, res) => {
       updateData.email = email.trim();
     }
 
-    const updatedUser = await User.findByIdAndUpdate(decoded.id, updateData, { new: true, runValidators: true });
+    const updatedUser = await User.findByIdAndUpdate(req.user.id, updateData, { returnDocument: "after", runValidators: true });
 
     return res.status(200).json({
       message: "Profile updated successfully.",
@@ -99,9 +86,7 @@ router.post("/", editProfileLimiter, async (req, res) => {
         mobileNumber: updatedUser.mobileNumber
       }
     });
-  } catch {
-    return res.status(401).json({ message: "Invalid token." });
-  }
+
 });
 
 module.exports = router;

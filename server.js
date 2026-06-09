@@ -8,6 +8,7 @@ const registerRouter         = require('./routes/register');
 const driverRegisterRouter   = require('./routes/driverRegister');
 const adminApplicationsRouter = require('./routes/admin/adminApplications');
 const editProfileRouter       = require('./routes/passenger/editProfile');
+const driverEditProfileRouter = require('./routes/driver/editProfile');
 
 const app  = express();
 const port = process.env.PORT;
@@ -20,6 +21,7 @@ app.use('/register',           registerRouter);
 app.use('/driver-register',    driverRegisterRouter);
 app.use('/admin/applications', adminApplicationsRouter);
 app.use('/passenger/edit-profile', editProfileRouter);
+app.use('/driver/edit-profile', driverEditProfileRouter);
 
 app.get('/', (_req, res) => {
   res.send('Hello World.');

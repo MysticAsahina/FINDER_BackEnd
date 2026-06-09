@@ -15,7 +15,7 @@ function authenticate(req, res, next) {
   try {
     const decoded = jwt.verify(
       authHeader.split(" ")[1],
-      process.env.JWT_SECRET
+      process.env.ACCESS_SECRET
     );
 
     if (decoded.pending) {
