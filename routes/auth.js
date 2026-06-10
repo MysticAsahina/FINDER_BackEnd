@@ -244,10 +244,11 @@ async function loginAdmin(req, res) {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) return invalidCredentials(res);
 
+  const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
 
   return res.status(200).json({
-    pendingToken: signPendingToken(user),
+    pendingToken: signPendingToken(user, rememberMe),
     message: "Credentials verified. OTP sent to your registered mobile number.",
   });
 }
@@ -393,6 +394,13 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user, decoded.rememberMe);
 
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: decoded.rememberMe ? 7 * 24 * 60 * 60 * 1000 : 12 * 60 * 60 * 1000,
+    });
+
     user.refreshToken = hashToken(refreshToken);
     await user.save();
 
@@ -466,7 +474,7 @@ router.post("/verify-mpin", async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post("/refresh", async (req, res) => {
   try {
-    const { refreshToken } = req.body;
+    const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
 
     if (!refreshToken) {
       return res.status(401).json({
@@ -489,6 +497,13 @@ router.post("/refresh", async (req, res) => {
 
     const accessToken = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user, decoded.rememberMe);
+
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: decoded.rememberMe ? 7 * 24 * 60 * 60 * 1000 : 12 * 60 * 60 * 1000,
+    });
 
     user.refreshToken = hashToken(newRefreshToken);
     await user.save();
@@ -517,8 +532,15 @@ router.post("/refresh", async (req, res) => {
 // POST /auth/logout
 // ---------------------------------------------------------------------------
 router.post("/logout", async (req, res) => {
-  const { refreshToken } = req.body;
-  if (!refreshToken) return res.status(400).json({ message: "Refresh token required." });
+  const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
+
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+  });
+
+  if (!refreshToken) return res.status(200).json({ message: "Logged out." });
 
   try {
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
