@@ -70,6 +70,11 @@ const userSchema = new mongoose.Schema(
       type: driverDetailsSchema,
       default: null,
     },
+    
+    pushTokens: {
+      type: [String],
+      default: [],
+    },
 
     refreshToken: {
       type: String,

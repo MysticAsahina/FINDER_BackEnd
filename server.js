@@ -11,9 +11,15 @@ const adminApplicationsRouter = require('./routes/admin/adminApplications');
 const editProfileRouter       = require('./routes/passenger/editProfile');
 const driverEditProfileRouter = require('./routes/driver/editProfile');
 const adminEditProfileRouter      = require('./routes/admin/editProfile');
+const supportRouter          = require('./routes/support');
 
-const app  = express();
-const port = process.env.PORT;
+
+const http = require("http");
+const socketService = require("./services/socket");
+
+const app    = express();
+const server = http.createServer(app);
+const port   = process.env.PORT;
 
 app.use(cors({
   origin: true,
@@ -26,9 +32,12 @@ app.use("/auth",               authRouter);
 app.use('/register',           registerRouter);
 app.use('/driver-register',    driverRegisterRouter);
 app.use('/admin/applications', adminApplicationsRouter);
+
 app.use('/passenger/edit-profile', editProfileRouter);
 app.use('/driver/edit-profile', driverEditProfileRouter);
 app.use('/admin/edit-profile', adminEditProfileRouter);
+
+app.use('/support', supportRouter);
 
 app.get('/', (_req, res) => {
   res.send('Hello World.');
@@ -48,7 +57,8 @@ app.get("/health", (_req, res) => {
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log("MongoDB connected");
-    app.listen(port, () => {
+    socketService.init(server);
+    server.listen(port, () => {
       console.log(`Listening on port ${port}`);
     });
   })
