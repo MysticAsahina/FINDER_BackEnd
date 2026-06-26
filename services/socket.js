@@ -44,6 +44,11 @@ function init(server) {
     }
     activeUsers.get(userId).push(socket.id);
 
+    // If user is an admin, join the admin broadcast room
+    if (socket.user.role === "admin") {
+      socket.join("admin_room");
+    }
+
     // When the client opens a specific ticket's chat screen,
     // they emit "join_ticket" to start receiving real-time messages for it.
     socket.on("join_ticket", ({ ticketId }) => {
@@ -80,6 +85,18 @@ function broadcastToTicket(ticketId, message) {
   io.to(ticketId).emit("receive_message", message);
 }
 
+// Broadcast that a ticket was resolved
+function broadcastTicketResolved(ticketId) {
+  if (!io) return;
+  io.to(ticketId).emit("ticket_resolved");
+}
+
+// Broadcast an event to all connected admins
+function broadcastToAdmins(event, payload) {
+  if (!io) return;
+  io.to("admin_room").emit(event, payload);
+}
+
 // Check if a specific user has any active socket connections
 function isUserOnline(userId) {
   return activeUsers.has(userId.toString());
@@ -91,4 +108,4 @@ function getIO() {
   return io;
 }
 
-module.exports = { init, broadcastToTicket, isUserOnline, getIO };
+module.exports = { init, broadcastToTicket, broadcastTicketResolved, broadcastToAdmins, isUserOnline, getIO };

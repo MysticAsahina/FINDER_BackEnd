@@ -7,6 +7,11 @@ const supportTicketSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    userRole: {
+      type: String,
+      enum: ["passenger", "driver"],
+      required: true,
+    },
     subject: {
       type: String,
       required: true,

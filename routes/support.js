@@ -3,7 +3,7 @@ const { authenticate } = require("../middleware/auth");
 const User           = require("../models/User");
 const SupportTicket  = require("../models/SupportTicket");
 const ChatMessage    = require("../models/ChatMessage");
-const { broadcastToTicket, isUserOnline } = require("../services/socket");
+const { broadcastToTicket, broadcastTicketResolved, broadcastToAdmins, isUserOnline } = require("../services/socket");
 const { sendPushToUser } = require("../services/notification");
 
 const router = express.Router();
@@ -25,6 +25,16 @@ router.post("/push-token", authenticate, async (req, res) => {
   return res.status(200).json({ message: "Push token registered." });
 });
 
+const VALID_CATEGORIES = [
+  "Fare Dispute",
+  "Lost Item",
+  "Driver Complaint",
+  "App Issue",
+  "Account & Profile",
+  "General Support",
+  "Other"
+];
+
 // Create a new support ticket (passengers and drivers only)
 router.post("/tickets", authenticate, async (req, res) => {
   const { subject } = req.body;
@@ -37,10 +47,31 @@ router.post("/tickets", authenticate, async (req, res) => {
     return res.status(400).json({ message: "Subject is required." });
   }
 
+  const trimmedSubject = subject.trim();
+  if (!VALID_CATEGORIES.includes(trimmedSubject)) {
+    return res.status(400).json({ message: "Invalid subject category." });
+  }
+
+  const openTicketsCount = await SupportTicket.countDocuments({
+    userId: req.user.id,
+    status: "open"
+  });
+
+  if (openTicketsCount >= 3) {
+    return res.status(400).json({ message: "You have reached the maximum number of open tickets (3). Please wait for an existing ticket to be resolved." });
+  }
+
   const ticket = await SupportTicket.create({
     userId: req.user.id,
-    subject: subject.trim(),
+    userRole: req.user.role,
+    subject: trimmedSubject,
   });
+
+  // Populate user info so admin panel can display it immediately
+  await ticket.populate("userId", "firstName lastName role");
+  
+  // Notify admins
+  broadcastToAdmins("new_ticket", ticket);
 
   return res.status(201).json({ ticket });
 });
@@ -48,6 +79,10 @@ router.post("/tickets", authenticate, async (req, res) => {
 // Fetch tickets — admin sees all, others see only their own
 router.get("/tickets", authenticate, async (req, res) => {
   const filter = req.user.role === "admin" ? {} : { userId: req.user.id };
+  
+  if (req.user.role === "admin" && req.query.role) {
+    filter.userRole = req.query.role;
+  }
 
   const tickets = await SupportTicket.find(filter)
     .populate("userId", "firstName lastName role")
@@ -72,7 +107,7 @@ router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   const messages = await ChatMessage.find({ ticketId: ticket._id })
     .sort({ createdAt: 1 });
 
-  return res.status(200).json({ messages });
+  return res.status(200).json({ messages, status: ticket.status });
 });
 
 // Send a message in a ticket
@@ -107,6 +142,12 @@ router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
 
   // Broadcast to anyone currently viewing this ticket in real-time
   broadcastToTicket(ticket._id.toString(), message);
+  
+  // Notify all admins to update their ticket list preview
+  broadcastToAdmins("ticket_updated", {
+    ticketId: ticket._id.toString(),
+    updatedAt: ticket.updatedAt,
+  });
 
   // If the other party is offline, send a push notification
   if (req.user.role === "admin") {
@@ -131,6 +172,46 @@ router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   }
 
   return res.status(201).json({ message });
+});
+
+// Resolve a ticket
+router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Only admins can resolve tickets." });
+  }
+
+  const ticket = await SupportTicket.findById(req.params.ticketId);
+
+  if (!ticket) {
+    return res.status(404).json({ message: "Ticket not found." });
+  }
+
+  if (ticket.status === "resolved") {
+    return res.status(400).json({ message: "Ticket is already resolved." });
+  }
+
+  ticket.status = "resolved";
+  ticket.updatedAt = new Date();
+  await ticket.save();
+
+  // Create a system message
+  const message = await ChatMessage.create({
+    ticketId: ticket._id,
+    senderId: req.user.id,
+    senderRole: "admin",
+    body: "This ticket has been marked as resolved by an admin.",
+  });
+
+  // Broadcast the system message and the resolved event
+  broadcastToTicket(ticket._id.toString(), message);
+  broadcastTicketResolved(ticket._id.toString());
+  broadcastToAdmins("ticket_updated", {
+    ticketId: ticket._id.toString(),
+    updatedAt: ticket.updatedAt,
+    status: "resolved"
+  });
+
+  return res.status(200).json({ ticket });
 });
 
 module.exports = router;
