@@ -61,6 +61,32 @@ function init(server) {
       socket.leave(ticketId);
     });
 
+    // ── Rides ──────────────────────────────────────────────────────────────
+    // When a passenger or driver opens a ride screen, they join the ride room
+    socket.on("join_ride", ({ rideId }) => {
+      console.log(`[Socket] User ${userId} joining ride room: ${rideId}`);
+      socket.join(rideId);
+    });
+
+    socket.on("leave_ride", ({ rideId }) => {
+      socket.leave(rideId);
+    });
+
+    socket.on("send_ride_message", ({ rideId, message }) => {
+      broadcastToRide(rideId, "receive_ride_message", {
+        from: socket.user.role,
+        text: message.text,
+        time: message.time,
+        id: message.id
+      });
+    });
+
+    // Driver sends their location during an active trip
+    socket.on("driver_location_update", ({ rideId, location }) => {
+      // Broadcast this location update to anyone else in the ride room (the passenger)
+      broadcastToRide(rideId, "driver_location_update", location);
+    });
+
     // Clean up when the socket disconnects (e.g. user closes the app)
     socket.on("disconnect", () => {
       const sockets = activeUsers.get(userId) || [];
@@ -77,24 +103,42 @@ function init(server) {
   return io;
 }
 
-// ── Helper functions (used by routes/support.js) ───────────────────────────
+// ── Helper functions (used by routes/support.js and routes/ride.js) ────────
 
 // Broadcast a message to all clients currently viewing a specific ticket
 function broadcastToTicket(ticketId, message) {
   if (!io) return;
-  io.to(ticketId).emit("receive_message", message);
+  io.to(ticketId.toString()).emit("receive_message", message);
 }
 
 // Broadcast that a ticket was resolved
 function broadcastTicketResolved(ticketId) {
   if (!io) return;
-  io.to(ticketId).emit("ticket_resolved");
+  io.to(ticketId.toString()).emit("ticket_resolved");
 }
 
 // Broadcast an event to all connected admins
 function broadcastToAdmins(event, payload) {
   if (!io) return;
   io.to("admin_room").emit(event, payload);
+}
+
+// Broadcast to a specific ride room (for state updates, location tracking, chat)
+function broadcastToRide(rideId, event, payload) {
+  if (!io) return;
+  console.log(`[Socket] Broadcasting ${event} to room: ${rideId}`);
+  io.to(rideId.toString()).emit(event, payload);
+}
+
+// Send an event to a specific user (e.g., sending a ride request to a driver)
+function sendToUser(userId, event, payload) {
+  if (!io) return;
+  const sockets = activeUsers.get(userId.toString());
+  if (sockets && sockets.length > 0) {
+    sockets.forEach(socketId => {
+      io.to(socketId).emit(event, payload);
+    });
+  }
 }
 
 // Check if a specific user has any active socket connections
@@ -108,4 +152,13 @@ function getIO() {
   return io;
 }
 
-module.exports = { init, broadcastToTicket, broadcastTicketResolved, broadcastToAdmins, isUserOnline, getIO };
+module.exports = { 
+  init, 
+  broadcastToTicket, 
+  broadcastTicketResolved, 
+  broadcastToAdmins, 
+  broadcastToRide,
+  sendToUser,
+  isUserOnline, 
+  getIO 
+};

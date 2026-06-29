@@ -56,24 +56,58 @@ const editProfileLimiter = rateLimit({
 });
 
 router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), async (req, res) => {
-  const { firstName, lastName, email, mobileNumber } = req.body;
+  const { firstName, lastName, email, mobileNumber, password } = req.body;
 
-  if (!firstName || !lastName || !mobileNumber) {
-    return res.status(400).json({
-      message: "Required fields are missing."
-    });
+  const errors = [];
+  
+  const fnError = validateName(firstName, "First Name");
+  if (fnError) errors.push(fnError);
+  
+  const lnError = validateName(lastName, "Last Name");
+  if (lnError) errors.push(lnError);
+
+  if (mobileNumber) {
+    const mobileError = validateMobileFormat(mobileNumber.trim());
+    if (mobileError) errors.push(mobileError);
+  } else {
+    errors.push("Mobile number is required.");
   }
+
+  if (email && email.trim()) {
+    const emailFormatError = validateEmailFormat(email.trim());
+    if (emailFormatError) errors.push(emailFormatError);
+    const emailLengthError = validateEmailLength(email.trim());
+    if (emailLengthError) errors.push(emailLengthError);
+  }
+
+  if (password !== undefined) {
+    const passwordLenError = validatePasswordLength(password);
+    if (passwordLenError) errors.push(passwordLenError);
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ message: errors.join(" ") });
+  }
+
+  try {
     const updateData = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       mobileNumber: mobileNumber.trim(),
     };
 
-    if (email?.trim()) {
+    if (email && email.trim()) {
       updateData.email = email.trim();
     }
 
-    const updatedUser = await User.findByIdAndUpdate(req.user.id, updateData, { returnDocument: "after", runValidators: true });
+    const updatedUser = await User.findById(req.user.id);
+    if (!updatedUser) return res.status(404).json({ message: "User not found." });
+
+    Object.assign(updatedUser, updateData);
+    if (password !== undefined) {
+      updatedUser.password = password;
+    }
+    await updatedUser.save();
 
     return res.status(200).json({
       message: "Profile updated successfully.",
@@ -86,6 +120,13 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), as
         mobileNumber: updatedUser.mobileNumber
       }
     });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(409).json({ message: "Email or mobile number is already in use." });
+    }
+    console.error("[passenger-edit-profile]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
 
 });
 

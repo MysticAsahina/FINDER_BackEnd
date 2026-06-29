@@ -12,7 +12,9 @@ const editProfileRouter       = require('./routes/passenger/editProfile');
 const driverEditProfileRouter = require('./routes/driver/editProfile');
 const adminEditProfileRouter      = require('./routes/admin/editProfile');
 const supportRouter          = require('./routes/support');
-
+const driverStatusRouter     = require('./routes/driver/status');
+const passengerRideRouter    = require('./routes/passenger/ride');
+const driverRideRouter       = require('./routes/driver/ride');
 
 const http = require("http");
 const socketService = require("./services/socket");
@@ -38,6 +40,9 @@ app.use('/driver/edit-profile', driverEditProfileRouter);
 app.use('/admin/edit-profile', adminEditProfileRouter);
 
 app.use('/support', supportRouter);
+app.use('/driver/status', driverStatusRouter);
+app.use('/passenger/ride', passengerRideRouter);
+app.use('/driver/ride', driverRideRouter);
 
 app.get('/', (_req, res) => {
   res.send('Hello World.');
