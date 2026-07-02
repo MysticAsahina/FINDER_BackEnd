@@ -80,6 +80,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    
+    // --- Emergency Contact (optional for all users) ---
+    emergencyContact: {
+      type: {
+        firstName: { type: String, required: true },
+        lastName: { type: String, required: true },
+        mobileNumber: { type: String, required: true },
+      },
+      default: null,
+    },
   },
   { timestamps: true }
 );

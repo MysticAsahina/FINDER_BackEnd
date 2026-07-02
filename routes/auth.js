@@ -410,6 +410,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       mobileNumber: user.mobileNumber,
+      emergencyContact: user.emergencyContact || null,
     };
 
     if (user.role === "admin")  userPayload.email   = user.email;
@@ -514,6 +515,7 @@ router.post("/refresh", async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         mobileNumber: user.mobileNumber,
+        emergencyContact: user.emergencyContact || null,
     };
 
     if (user.role === "admin")  userPayload.email   = user.email;
