@@ -1,5 +1,6 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
+const ActiveDriver = require("../models/ActiveDriver");
 
 let io;
 
@@ -88,7 +89,7 @@ function init(server) {
     });
 
     // Clean up when the socket disconnects (e.g. user closes the app)
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
       const sockets = activeUsers.get(userId) || [];
       const index = sockets.indexOf(socket.id);
       if (index !== -1) sockets.splice(index, 1);
@@ -96,6 +97,19 @@ function init(server) {
       // If the user has no remaining connections, remove them entirely
       if (sockets.length === 0) {
         activeUsers.delete(userId);
+        
+        // If they are a driver, mark them offline since they completely closed the app
+        if (socket.user.role === "driver") {
+          try {
+            await ActiveDriver.findOneAndUpdate(
+              { driverId: userId },
+              { isOnline: false }
+            );
+            console.log(`[Socket] Driver ${userId} completely disconnected. Set to offline.`);
+          } catch (err) {
+            console.error(`[Socket] Failed to set driver ${userId} offline on disconnect:`, err);
+          }
+        }
       }
     });
   });
