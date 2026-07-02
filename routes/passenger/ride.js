@@ -22,6 +22,23 @@ router.get("/current", authenticate, requireRole("passenger"), async (req, res) 
   }
 });
 
+// Get passenger ride history
+router.get("/history", authenticate, requireRole("passenger"), async (req, res) => {
+  try {
+    const rides = await Ride.find({
+      passengerId: req.user.id,
+      status: { $in: ["completed", "cancelled"] },
+    })
+      .sort({ createdAt: -1 })
+      .populate("driverId", "firstName lastName mobileNumber driverDetails");
+    
+    res.json({ rides });
+  } catch (err) {
+    console.error("[passenger-ride-history]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Request a new ride
 router.post("/request", authenticate, requireRole("passenger"), async (req, res) => {
   const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
