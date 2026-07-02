@@ -61,11 +61,27 @@ const rideSchema = new mongoose.Schema(
     },
     distanceKm: {
       type: Number,
-      default: 0,
+      required: true,
     },
     durationMins: {
       type: Number,
-      default: 0,
+      required: true,
+    },
+    tripStartedAt: {
+      type: Date,
+      default: null,
+    },
+    tripCompletedAt: {
+      type: Date,
+      default: null,
+    },
+    actualDistanceKm: {
+      type: Number,
+      default: null,
+    },
+    actualDurationMins: {
+      type: Number,
+      default: null,
     },
     ignoredDrivers: [{
       type: mongoose.Schema.Types.ObjectId,

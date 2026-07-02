@@ -166,6 +166,20 @@ function getIO() {
   return io;
 }
 
+// Force all active sockets of a user to join a specific room
+function joinUserToRoom(userId, roomName) {
+  if (!io) return;
+  const sockets = activeUsers.get(userId.toString());
+  if (sockets && sockets.length > 0) {
+    sockets.forEach(socketId => {
+      const socket = io.sockets.sockets.get(socketId);
+      if (socket) {
+        socket.join(roomName);
+      }
+    });
+  }
+}
+
 module.exports = { 
   init, 
   broadcastToTicket, 
@@ -174,5 +188,6 @@ module.exports = {
   broadcastToRide,
   sendToUser,
   isUserOnline, 
-  getIO 
+  getIO,
+  joinUserToRoom
 };

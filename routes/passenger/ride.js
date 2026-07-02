@@ -3,7 +3,7 @@ const { authenticate, requireRole } = require("../../middleware/auth");
 const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
 const { matchRide } = require("../../services/rideMatcher");
-const { broadcastToRide } = require("../../services/socket");
+const { broadcastToRide, joinUserToRoom } = require("../../services/socket");
 
 const router = express.Router();
 
@@ -85,6 +85,9 @@ router.post("/request", authenticate, requireRole("passenger"), async (req, res)
     console.log("Ride before save:", JSON.stringify(ride, null, 2));
 
     await ride.save();
+
+    // Instantly join the passenger to the ride's socket room
+    joinUserToRoom(req.user.id, ride._id.toString());
 
     // Start matching process asynchronously
     matchRide(ride._id);

@@ -107,6 +107,10 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
         const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
         if (!ride) return res.status(404).json({ message: "Ride not found." });
 
+        if (ride.status === "cancelled" || ride.status === "completed") {
+            return res.status(400).json({ message: "Ride is already cancelled or completed." });
+        }
+
         if ((status === "arrived_pickup" || status === "completed") && latitude !== undefined && longitude !== undefined) {
             let targetCoords;
             if (status === "arrived_pickup") {
@@ -121,6 +125,17 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
                     broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
                     return res.status(400).json({ code: "GPS_TOO_FAR", message: "You are too far from the location. Waiting for passenger override." });
                 }
+            }
+        }
+        if (status === "trip_started") {
+            ride.tripStartedAt = new Date();
+        } else if (status === "completed") {
+            ride.tripCompletedAt = new Date();
+            if (ride.tripStartedAt) {
+                ride.actualDurationMins = Math.round((ride.tripCompletedAt - ride.tripStartedAt) / 60000);
+            }
+            if (req.body.actualDistanceKm !== undefined) {
+                ride.actualDistanceKm = req.body.actualDistanceKm;
             }
         }
         
