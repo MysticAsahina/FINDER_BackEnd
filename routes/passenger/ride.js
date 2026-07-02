@@ -150,11 +150,26 @@ router.post("/:id/override", authenticate, requireRole("passenger"), async (req,
       return res.status(400).json({ message: "Ride is already completed or cancelled." });
     }
 
+    if (status === "completed") {
+      ride.tripCompletedAt = new Date();
+      if (ride.tripStartedAt) {
+          ride.actualDurationMins = parseFloat(((ride.tripCompletedAt - ride.tripStartedAt) / 60000).toFixed(1));
+      }
+      if (req.body.actualDistanceKm !== undefined) {
+          ride.actualDistanceKm = req.body.actualDistanceKm;
+      }
+    }
+
     ride.status = status;
     await ride.save();
 
     // Broadcast update so driver and passenger screens advance
-    broadcastToRide(ride._id, "ride_status_update", { rideId: ride._id, status });
+    broadcastToRide(ride._id, "ride_status_update", { 
+      rideId: ride._id, 
+      status, 
+      actualDurationMins: ride.actualDurationMins, 
+      actualDistanceKm: ride.actualDistanceKm 
+    });
 
     if (status === "completed") {
       // Free up driver

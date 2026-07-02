@@ -87,6 +87,14 @@ const rideSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     }], // List of drivers who declined or ignored the request
+    chatMessages: [{
+      senderRole: { type: String, enum: ['passenger', 'driver'] },
+      senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      text: { type: String, required: true },
+      time: { type: String },
+      id: { type: String }, // For frontend React keys
+      createdAt: { type: Date, default: Date.now }
+    }],
   },
   { timestamps: true }
 );

@@ -15,6 +15,8 @@ const supportRouter          = require('./routes/support');
 const driverStatusRouter     = require('./routes/driver/status');
 const passengerRideRouter    = require('./routes/passenger/ride');
 const driverRideRouter       = require('./routes/driver/ride');
+const passengerChatRouter    = require('./routes/passenger/chat');
+const driverChatRouter       = require('./routes/driver/chat');
 const emergencyContactRouter = require('./routes/emergencyContact');
 
 const http = require("http");
@@ -44,6 +46,8 @@ app.use('/support', supportRouter);
 app.use('/driver/status', driverStatusRouter);
 app.use('/passenger/ride', passengerRideRouter);
 app.use('/driver/ride', driverRideRouter);
+app.use('/passenger/ride', passengerChatRouter);
+app.use('/driver/ride', driverChatRouter);
 app.use('/emergency-contact', emergencyContactRouter);
 
 app.get('/', (_req, res) => {

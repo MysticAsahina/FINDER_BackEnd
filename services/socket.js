@@ -73,14 +73,7 @@ function init(server) {
       socket.leave(rideId);
     });
 
-    socket.on("send_ride_message", ({ rideId, message }) => {
-      broadcastToRide(rideId, "receive_ride_message", {
-        from: socket.user.role,
-        text: message.text,
-        time: message.time,
-        id: message.id
-      });
-    });
+
 
     // Driver sends their location during an active trip
     socket.on("driver_location_update", ({ rideId, location }) => {

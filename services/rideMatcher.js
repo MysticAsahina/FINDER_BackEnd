@@ -39,8 +39,9 @@ async function matchRide(rideId) {
         if (currentRide && currentRide.status === "pending") {
           currentRide.status = "cancelled";
           await currentRide.save();
-          // Notify passenger
+          // Notify passenger (broadcast to room AND directly to user to avoid race conditions)
           broadcastToRide(currentRide._id, "ride_cancelled", { reason: "No drivers available" });
+          sendToUser(currentRide.passengerId, "ride_cancelled", { reason: "No drivers available" });
         }
       }, 2000);
       return;

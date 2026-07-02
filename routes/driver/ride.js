@@ -132,7 +132,7 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
         } else if (status === "completed") {
             ride.tripCompletedAt = new Date();
             if (ride.tripStartedAt) {
-                ride.actualDurationMins = Math.round((ride.tripCompletedAt - ride.tripStartedAt) / 60000);
+                ride.actualDurationMins = parseFloat(((ride.tripCompletedAt - ride.tripStartedAt) / 60000).toFixed(1));
             }
             if (req.body.actualDistanceKm !== undefined) {
                 ride.actualDistanceKm = req.body.actualDistanceKm;
@@ -143,7 +143,12 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
     await ride.save();
 
     // Broadcast update
-    broadcastToRide(ride._id, "ride_status_update", { rideId: ride._id, status });
+    broadcastToRide(ride._id, "ride_status_update", { 
+      rideId: ride._id, 
+      status, 
+      actualDurationMins: ride.actualDurationMins, 
+      actualDistanceKm: ride.actualDistanceKm 
+    });
 
     if (status === "completed") {
       // Free up driver
