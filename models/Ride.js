@@ -90,7 +90,9 @@ const rideSchema = new mongoose.Schema(
     chatMessages: [{
       senderRole: { type: String, enum: ['passenger', 'driver'] },
       senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      text: { type: String, required: true },
+      text: { type: String, default: null },
+      mediaUrl: { type: String, default: null },
+      mediaType: { type: String, enum: ['image', 'video'], default: null },
       time: { type: String },
       id: { type: String }, // For frontend React keys
       createdAt: { type: Date, default: Date.now }

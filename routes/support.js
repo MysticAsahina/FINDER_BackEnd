@@ -1,10 +1,24 @@
 const express  = require("express");
+const rateLimit = require("express-rate-limit");
 const { authenticate } = require("../middleware/auth");
 const User           = require("../models/User");
 const SupportTicket  = require("../models/SupportTicket");
 const ChatMessage    = require("../models/ChatMessage");
 const { broadcastToTicket, broadcastTicketResolved, broadcastToAdmins, isUserOnline } = require("../services/socket");
 const { sendPushToUser } = require("../services/notification");
+const { logAdminAction } = require("../utils/auditLogger");
+
+const ALLOWED_MEDIA_TYPES = ["image", "video"];
+
+// Rate limiter — max 30 messages per minute per user
+const messageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip,
+  message: { message: "You are sending messages too quickly. Please slow down." },
+});
 
 const router = express.Router();
 
@@ -110,12 +124,25 @@ router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   return res.status(200).json({ messages, status: ticket.status });
 });
 
-// Send a message in a ticket
-router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
-  const { body } = req.body;
+// Send a message in a ticket (text, media, or both)
+router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (req, res) => {
+  const { body, mediaUrl, mediaType } = req.body;
 
-  if (!body || !body.trim()) {
-    return res.status(400).json({ message: "Message body is required." });
+  const hasText = body && typeof body === "string" && body.trim();
+  const hasMedia = mediaUrl && mediaType;
+
+  if (!hasText && !hasMedia) {
+    return res.status(400).json({ message: "A message must have either text or a media attachment." });
+  }
+
+  // Validate media fields if present
+  if (hasMedia) {
+    if (typeof mediaUrl !== "string" || !mediaUrl.startsWith("https://")) {
+      return res.status(400).json({ message: "Invalid media URL." });
+    }
+    if (!ALLOWED_MEDIA_TYPES.includes(mediaType)) {
+      return res.status(400).json({ message: 'Invalid media type. Must be "image" or "video".' });
+    }
   }
 
   const ticket = await SupportTicket.findById(req.params.ticketId);
@@ -129,12 +156,19 @@ router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
     return res.status(403).json({ message: "Access denied." });
   }
 
-  const message = await ChatMessage.create({
+  const messageData = {
     ticketId: ticket._id,
     senderId: req.user.id,
     senderRole: req.user.role,
-    body: body.trim(),
-  });
+  };
+
+  if (hasText) messageData.body = body.trim();
+  if (hasMedia) {
+    messageData.mediaUrl = mediaUrl;
+    messageData.mediaType = mediaType;
+  }
+
+  const message = await ChatMessage.create(messageData);
 
   // Touch the ticket's updatedAt so it floats to the top of the list
   ticket.updatedAt = new Date();
@@ -149,11 +183,18 @@ router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
     updatedAt: ticket.updatedAt,
   });
 
+  // Build push notification body
+  const pushBody = hasText
+    ? body.trim()
+    : hasMedia
+      ? `Sent ${mediaType === "video" ? "a video" : "an image"}`
+      : "New message";
+
   // If the other party is offline, send a push notification
   if (req.user.role === "admin") {
     // Admin sent the message → check if the ticket owner (passenger/driver) is online
     if (!isUserOnline(ticket.userId)) {
-      await sendPushToUser(ticket.userId, "Support Update 💬", body.trim(), {
+      await sendPushToUser(ticket.userId, "Support Update 💬", pushBody, {
         ticketId: ticket._id.toString(),
         type: "support_chat",
       });
@@ -163,7 +204,7 @@ router.post("/tickets/:ticketId/messages", authenticate, async (req, res) => {
     const admins = await User.find({ role: "admin" }).select("_id");
     for (const admin of admins) {
       if (!isUserOnline(admin._id)) {
-        await sendPushToUser(admin._id, "New Support Message 💬", body.trim(), {
+        await sendPushToUser(admin._id, "New Support Message 💬", pushBody, {
           ticketId: ticket._id.toString(),
           type: "support_chat",
         });
@@ -193,6 +234,9 @@ router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
   ticket.status = "resolved";
   ticket.updatedAt = new Date();
   await ticket.save();
+
+  await ticket.populate("userId", "firstName lastName");
+  await logAdminAction(req, req.user.id, "", "TICKET_RESOLVED", `Resolved support ticket #${ticket._id.toString().slice(-6)} (${ticket.subject}) from ${ticket.userRole} ${ticket.userId.firstName} ${ticket.userId.lastName}`);
 
   // Create a system message
   const message = await ChatMessage.create({

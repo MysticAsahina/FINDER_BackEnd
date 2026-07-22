@@ -3,18 +3,10 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const { logAdminAction } = require("../utils/auditLogger");
+const { sendSmsOtp: sendOtp, verifyOtp } = require("../utils/otpManager");
 
 const router = express.Router();
-
-// OTP expires in 5 minutes
-const OTP_EXPIRY_MS = 5 * 60 * 1000
-
-// ---------------------------------------------------------------------------
-// OTP store
-// Keyed by userId (string) so multiple users can have active OTPs at once.
-// Each entry: { code, expiresAt, attempts }
-// ---------------------------------------------------------------------------
-const otpStore = new Map();
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -165,67 +157,6 @@ function hashToken (token) {
 const invalidCredentials = (res) =>
   res.status(401).json({ message: "Invalid credentials." });
 
-function generateOtp() {
-  return String(crypto.randomInt(100000, 999999));
-}
-
-// Converts number to E164 format, used for OTP
-function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
-}
-
-async function sendOtp(userId, mobileNumber) {
-  const code = generateOtp();
-  const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  const recipient = toE164(mobileNumber);
-
-  const apiUsername = process.env.SMS_GATE_USERNAME;
-  const apiPassword = process.env.SMS_GATE_PASSWORD;
-
-  /* Temporary remove due to lack of load
-  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phoneNumbers: [ recipient ],
-      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
-    }),
-  });
-
-  console.log("Code: " + code);
-  const data = await response.json();
-
-  if (!response.ok) {
-    const err = new Error(data.message || "Failed to send OTP.");
-    err.smsStatus = response.status;
-    err.smsCode   = data.code;
-    throw err;
-  } */
-
-  console.log("Code: " + code);
-  otpStore.set(String(userId), { code, expiresAt, attempts: 0 });
-}
-
-function verifyOtp(userId, submittedCode) {
-  const key   = String(userId);
-  const entry = otpStore.get(key);
-
-  if (!entry) return false;
-  if (Date.now() > entry.expiresAt) { otpStore.delete(key); return false; }
-
-  if (submittedCode !== entry.code) {
-    entry.attempts += 1;
-    if (entry.attempts >= 3) otpStore.delete(key); // burn after 3 wrong attempts
-    return false;
-  }
-
-  otpStore.delete(key); // correct — consume it
-  return true;
-}
-
 // ---------------------------------------------------------------------------
 // Role-specific login strategies
 // ---------------------------------------------------------------------------
@@ -239,10 +170,16 @@ async function loginAdmin(req, res) {
   }
 
   const user = await User.findOne({ email, role: "admin" });
-  if (!user) return invalidCredentials(res);
+  if (!user) {
+    logAdminAction(req, null, email, "LOGIN_FAILED", `Failed login attempt (user not found) for email: ${email}`);
+    return invalidCredentials(res);
+  }
 
   const isMatch = await user.comparePassword(password);
-  if (!isMatch) return invalidCredentials(res);
+  if (!isMatch) {
+    logAdminAction(req, user._id, user.firstName + " " + user.lastName, "LOGIN_FAILED", `Failed login attempt (incorrect password)`);
+    return invalidCredentials(res);
+  }
 
   const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
@@ -386,9 +323,9 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found." });
 
-    const isValid = verifyOtp(user._id, code);
-    if (!isValid) {
-      return res.status(401).json({ message: "Invalid or expired OTP." });
+    const otpResult = verifyOtp(user._id, code);
+    if (!otpResult.valid) {
+      return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
     }
 
     const accessToken = signAccessToken(user);
@@ -403,6 +340,10 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
 
     user.refreshToken = hashToken(refreshToken);
     await user.save();
+
+    if (user.role === "admin") {
+      logAdminAction(req, user._id, user.firstName + " " + user.lastName, "LOGIN_SUCCESS", "Admin logged in successfully");
+    }
 
     const userPayload = {
       id: user._id,
@@ -546,10 +487,23 @@ router.post("/logout", async (req, res) => {
 
   try {
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
-    await User.findByIdAndUpdate(decoded.id, { refreshToken: null });
+    const user = await User.findById(decoded.id);
+    if (user && user.role === "admin") {
+      logAdminAction(req, user._id, user.firstName + " " + user.lastName, "LOGOUT", "Admin logged out");
+    }
+    await User.findByIdAndUpdate(decoded.id, { refreshToken: null, pushTokens: [] });
     return res.status(200).json({ message: "Logged out." });
   } catch {
     // Even if the token is expired/invalid, treat as logged out
+    // Try to decode without verification to clear the tokens anyway
+    try {
+      const decoded = jwt.decode(refreshToken);
+      if (decoded && decoded.id) {
+        await User.findByIdAndUpdate(decoded.id, { refreshToken: null, pushTokens: [] });
+      }
+    } catch (e) {
+      // Ignored
+    }
     return res.status(200).json({ message: "Logged out." });
   }
 });

@@ -1,0 +1,98 @@
+const express = require('express');
+const router = express.Router();
+const Ride = require('../../models/Ride');
+
+// GET /admin/reports
+router.get('/', async (req, res) => {
+  try {
+    const { month, year, page = 1, limit = 10 } = req.query;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Base query for finalized trips
+    const query = {
+      status: { $in: ['completed', 'cancelled'] }
+    };
+
+    // Date filtering using createdAt
+    if (month && year) {
+      // month is 1-indexed from frontend or standard
+      // We will assume month is string name (e.g., 'February') or number (e.g., '2')
+      // Actually, frontend mockup has strings 'February', 'January'. Let's handle month strings.
+      const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+      ];
+      const monthIndex = monthNames.indexOf(month);
+
+      if (monthIndex !== -1 && !isNaN(parseInt(year))) {
+        const start = new Date(year, monthIndex, 1);
+        const end = new Date(year, monthIndex + 1, 1);
+        query.createdAt = {
+          $gte: start,
+          $lt: end
+        };
+      }
+    }
+
+    // Run parallel queries: count total, get paginated, and aggregate stats
+    const [totalTrips, trips, statsAgg] = await Promise.all([
+      Ride.countDocuments(query),
+      Ride.find(query)
+        .populate('driverId', 'firstName lastName')
+        .populate('passengerId', 'firstName lastName')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum),
+      Ride.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            totalCompleted: {
+              $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] }
+            },
+            totalCancelled: {
+              $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] }
+            }
+          }
+        }
+      ])
+    ]);
+
+    // Format stats
+    let totalCompleted = 0;
+    let totalCount = 0;
+    
+    if (statsAgg.length > 0) {
+      totalCompleted = statsAgg[0].totalCompleted;
+      totalCount = statsAgg[0].totalCompleted + statsAgg[0].totalCancelled;
+    }
+
+    const completedRate = totalCount > 0 ? ((totalCompleted / totalCount) * 100).toFixed(1) : 0;
+
+    res.json({
+      success: true,
+      trips,
+      pagination: {
+        total: totalTrips,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalTrips / limitNum)
+      },
+      stats: {
+        totalTrips: totalCount,
+        completedTrips: totalCompleted,
+        completedRate: parseFloat(completedRate)
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching reports:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch reports." });
+  }
+});
+
+module.exports = router;

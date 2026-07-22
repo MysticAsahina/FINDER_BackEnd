@@ -2,6 +2,7 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
+const SystemSettings = require("../../models/SystemSettings");
 const { matchRide } = require("../../services/rideMatcher");
 const { broadcastToRide, joinUserToRoom } = require("../../services/socket");
 
@@ -60,6 +61,17 @@ router.post("/request", authenticate, requireRole("passenger"), async (req, res)
       return res.status(400).json({ message: "Only cash payments are supported currently." });
     }
 
+    // Fetch fare settings
+    let fareSettings = await SystemSettings.findOne({ key: "fare" });
+    if (!fareSettings) {
+      fareSettings = { baseFare: 25, perKmFare: 8.5, baseDistance: 2 };
+    }
+
+    // Calculate fare server-side
+    const dist = distanceKm || 0;
+    const extraKm = Math.max(0, dist - fareSettings.baseDistance);
+    const calculatedFare = parseFloat((fareSettings.baseFare + extraKm * fareSettings.perKmFare).toFixed(2));
+
     const ride = new Ride({
       passengerId: req.user.id,
       pickup: {
@@ -77,7 +89,7 @@ router.post("/request", authenticate, requireRole("passenger"), async (req, res)
         },
       },
       paymentMethod: "cash",
-      fare: fare || 50, // default min fare
+      fare: calculatedFare,
       distanceKm: distanceKm || 0,
       durationMins: durationMins || 0,
     });

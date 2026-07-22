@@ -3,6 +3,8 @@ const rateLimit = require("express-rate-limit");
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const { authenticate, requireRole } = require("../../middleware/auth");
+const { logAdminAction } = require("../../utils/auditLogger");
+const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
 
 const router = express.Router();
 
@@ -92,6 +94,16 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
   }
 
   try {
+    const updatedUser = await User.findById(req.user.id);
+    if (!updatedUser) return res.status(404).json({ message: "User not found." });
+
+    const isEmailChanged = email && email.trim() && email.trim() !== updatedUser.email;
+    const isMobileChanged = mobileNumber && mobileNumber.trim() && mobileNumber.trim() !== updatedUser.mobileNumber;
+
+    if (isEmailChanged && isMobileChanged) {
+      return res.status(400).json({ message: "Please update your email and mobile number separately." });
+    }
+
     const updateData = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -99,14 +111,65 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
       email: email.trim()
     };
 
+    if (password !== undefined) {
+      updateData.password = password;
+    }
+
+    const otpKey = req.user.id + "_adminProfileUpdate";
+
+    if (isEmailChanged) {
+      await createAndSendEmailOtp(otpKey, updateData.email, updateData);
+      return res.status(200).json({
+        pendingProfileOtp: true,
+        destination: "new email",
+        message: "An OTP has been sent to your new email address to verify this change.",
+      });
+    }
+
+    if (isMobileChanged) {
+      await sendSmsOtp(otpKey, updateData.mobileNumber, updateData);
+      return res.status(200).json({
+        pendingProfileOtp: true,
+        destination: "new mobile",
+        message: "An OTP has been sent to your new mobile number to verify this change.",
+      });
+    }
+
+    // Neither changed (just name/password), send to current mobile to verify identity
+    await sendSmsOtp(otpKey, updatedUser.mobileNumber, updateData);
+    return res.status(200).json({
+        pendingProfileOtp: true,
+        destination: "current mobile",
+        message: "An OTP has been sent to your registered mobile number to verify these changes.",
+    });
+  } catch (err) {
+    console.error("[admin-edit-profile]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+router.post("/verify-update", editProfileLimiter, authenticate, requireRole('admin'), async (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  const otpKey = req.user.id + "_adminProfileUpdate";
+  const otpResult = verifyOtp(otpKey, code);
+
+  if (!otpResult.valid) {
+    return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+  }
+
+  try {
+    const updateData = otpResult.payload;
     const updatedUser = await User.findById(req.user.id);
     if (!updatedUser) return res.status(404).json({ message: "User not found." });
 
     Object.assign(updatedUser, updateData);
-    if (password !== undefined) {
-      updatedUser.password = password;
-    }
     await updatedUser.save();
+
+    await logAdminAction(req, updatedUser._id, updatedUser.firstName + " " + updatedUser.lastName, "PROFILE_EDITED", "Admin updated profile details");
 
     return res.status(200).json({
       message: "Profile updated successfully.",
@@ -123,10 +186,9 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
     if (err.code === 11000) {
       return res.status(409).json({ message: "Email or mobile number is already in use." });
     }
-    console.error("[admin-edit-profile]", err);
+    console.error("[admin-verify-profile-update]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
   }
-
 });
 
 module.exports = router;

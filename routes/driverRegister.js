@@ -6,6 +6,7 @@ const cloudinary = require("cloudinary").v2;
 const cron = require("node-cron");
 const DriverApplication = require("../models/DriverApplication");
 const User = require("../models/User");
+const { broadcastToAdmins } = require("../services/socket");
 
 // Configure Cloudinary from env
 cloudinary.config({
@@ -578,6 +579,12 @@ router.post("/submit", submitLimiter, async (req, res) => {
     });
 
     await application.save();
+
+    // Notify connected admins in real-time
+    broadcastToAdmins('new_driver_application', {
+      name: `${decoded.firstName} ${decoded.lastName}`,
+      applicationId: application._id,
+    });
 
     // Replace temp tag with permanent tag so the cleanup job never touches
     // images belonging to a submitted application

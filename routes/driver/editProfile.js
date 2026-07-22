@@ -2,6 +2,7 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const User = require("../../models/User");
 const { authenticate, requireRole } = require("../../middleware/auth");
+const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
 
 const router = express.Router();
 
@@ -157,24 +158,43 @@ router.patch(
         return res.status(400).json({ message: errors.join(" ") });
       }
 
-      // Apply simple field updates
-      Object.assign(user, updates);
-      await user.save();
+      const isEmailChanged = updates.email !== undefined && updates.email !== user.email;
+      const isMobileChanged = updates.mobileNumber !== undefined && updates.mobileNumber !== user.mobileNumber;
 
-      // Return updated user payload (no sensitive fields)
-      const payload = {
-        id: user._id,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        mobileNumber: user.mobileNumber,
-        email: user.email ?? null,
-        hasMpin: !!user.driverDetails?.mpin,
-      };
+      if (isEmailChanged && isMobileChanged) {
+        return res.status(400).json({ message: "Please update your email and mobile number separately." });
+      }
 
-      return res
-        .status(200)
-        .json({ user: payload, message: "Profile updated." });
+      const updateData = { ...updates };
+      if (req.body.password !== undefined) updateData.password = req.body.password;
+      if (req.body.mpin !== undefined) updateData.mpin = req.body.mpin;
+
+      const otpKey = req.user.id + "_driverProfileUpdate";
+
+      if (isEmailChanged) {
+        await createAndSendEmailOtp(otpKey, updateData.email, updateData);
+        return res.status(200).json({
+          pendingProfileOtp: true,
+          destination: "new email",
+          message: "An OTP has been sent to your new email address to verify this change.",
+        });
+      }
+
+      if (isMobileChanged) {
+        await sendSmsOtp(otpKey, updateData.mobileNumber, updateData);
+        return res.status(200).json({
+          pendingProfileOtp: true,
+          destination: "new mobile",
+          message: "An OTP has been sent to your new mobile number to verify this change.",
+        });
+      }
+
+      await sendSmsOtp(otpKey, user.mobileNumber, updateData);
+      return res.status(200).json({
+          pendingProfileOtp: true,
+          destination: "current mobile",
+          message: "An OTP has been sent to your registered mobile number to verify these changes.",
+      });
     } catch (err) {
       console.error("[driver/edit-profile]", err);
       return res
@@ -183,5 +203,48 @@ router.patch(
     }
   }
 );
+
+router.post("/verify-update", editProfileLimiter, authenticate, requireRole("driver"), async (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  const otpKey = req.user.id + "_driverProfileUpdate";
+  const otpResult = verifyOtp(otpKey, code);
+
+  if (!otpResult.valid) {
+    return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+  }
+
+  try {
+    const updateData = otpResult.payload;
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const { password, mpin, ...simpleUpdates } = updateData;
+
+    Object.assign(user, simpleUpdates);
+    if (password !== undefined) user.password = password;
+    if (mpin !== undefined) user.driverDetails.mpin = mpin;
+
+    await user.save();
+
+    const payload = {
+      id: user._id,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      mobileNumber: user.mobileNumber,
+      email: user.email ?? null,
+      hasMpin: !!user.driverDetails?.mpin,
+    };
+
+    return res.status(200).json({ user: payload, message: "Profile updated." });
+  } catch (err) {
+    console.error("[driver/verify-profile-update]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
 
 module.exports = router;

@@ -162,4 +162,35 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
   }
 });
 
+// Get daily earnings
+router.get("/earnings/daily", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = formatter.formatToParts(new Date());
+    const d = {};
+    parts.forEach(p => { d[p.type] = p.value; });
+    
+    const startOfDay = new Date(`${d.year}-${d.month}-${d.day}T00:00:00.000+08:00`);
+    const endOfDay = new Date(`${d.year}-${d.month}-${d.day}T23:59:59.999+08:00`);
+
+    const rides = await Ride.find({
+      driverId: req.user.id,
+      status: "completed",
+      tripCompletedAt: { $gte: startOfDay, $lte: endOfDay }
+    });
+
+    const totalEarnings = rides.reduce((sum, ride) => sum + (ride.fare || 0), 0);
+    
+    res.json({ earnings: totalEarnings });
+  } catch (err) {
+    console.error("[driver-earnings-daily]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;

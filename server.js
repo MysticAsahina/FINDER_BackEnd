@@ -11,6 +11,9 @@ const adminApplicationsRouter = require('./routes/admin/adminApplications');
 const editProfileRouter       = require('./routes/passenger/editProfile');
 const driverEditProfileRouter = require('./routes/driver/editProfile');
 const adminEditProfileRouter      = require('./routes/admin/editProfile');
+const adminAuditLogsRouter        = require('./routes/admin/auditLogs');
+const adminDriversRouter          = require('./routes/admin/drivers');
+const adminReportsRouter          = require('./routes/admin/reports');
 const supportRouter          = require('./routes/support');
 const driverStatusRouter     = require('./routes/driver/status');
 const passengerRideRouter    = require('./routes/passenger/ride');
@@ -18,6 +21,10 @@ const driverRideRouter       = require('./routes/driver/ride');
 const passengerChatRouter    = require('./routes/passenger/chat');
 const driverChatRouter       = require('./routes/driver/chat');
 const emergencyContactRouter = require('./routes/emergencyContact');
+const adminSettingsRouter       = require('./routes/admin/settings');
+const passengerSettingsRouter   = require('./routes/passenger/settings');
+const mapsRouter                = require('./routes/maps');
+const chatMediaRouter           = require('./routes/chatMedia');
 
 const http = require("http");
 const socketService = require("./services/socket");
@@ -41,6 +48,10 @@ app.use('/admin/applications', adminApplicationsRouter);
 app.use('/passenger/edit-profile', editProfileRouter);
 app.use('/driver/edit-profile', driverEditProfileRouter);
 app.use('/admin/edit-profile', adminEditProfileRouter);
+app.use('/admin/audit-logs', adminAuditLogsRouter);
+app.use('/admin/drivers', adminDriversRouter);
+app.use('/admin/settings', adminSettingsRouter);
+app.use('/admin/reports', adminReportsRouter);
 
 app.use('/support', supportRouter);
 app.use('/driver/status', driverStatusRouter);
@@ -49,6 +60,9 @@ app.use('/driver/ride', driverRideRouter);
 app.use('/passenger/ride', passengerChatRouter);
 app.use('/driver/ride', driverChatRouter);
 app.use('/emergency-contact', emergencyContactRouter);
+app.use('/passenger/settings', passengerSettingsRouter);
+app.use('/maps', mapsRouter);
+app.use('/chat', chatMediaRouter);
 
 app.get('/', (_req, res) => {
   res.send('Hello World.');
