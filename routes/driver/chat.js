@@ -12,7 +12,7 @@ const messageLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || req.ip,
+  keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),
   message: { message: "You are sending messages too quickly. Please slow down." },
 });
 

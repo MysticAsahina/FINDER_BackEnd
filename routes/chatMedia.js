@@ -26,7 +26,7 @@ const signatureLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || req.ip,
+  keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),
   message: {
     message: "Too many upload requests. Please wait before trying again.",
   },
@@ -61,7 +61,7 @@ router.post(
       // Restrict upload to specific resource types
       const resourceType = mediaType === "video" ? "video" : "image";
 
-      const paramsToSign = { timestamp, folder, tags, resource_type: resourceType };
+      const paramsToSign = { timestamp, folder, tags };
 
       const signature = cloudinary.utils.api_sign_request(
         paramsToSign,

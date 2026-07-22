@@ -35,11 +35,10 @@ const chatMessageSchema = new mongoose.Schema(
 );
 
 // A message must have at least a text body or a media attachment
-chatMessageSchema.pre("validate", function (next) {
+chatMessageSchema.pre("validate", function () {
   if (!this.body && !this.mediaUrl) {
-    return next(new Error("A message must have either a body or a media attachment."));
+    throw new Error("A message must have either a body or a media attachment.");
   }
-  next();
 });
 
 module.exports = mongoose.model("ChatMessage", chatMessageSchema);
