@@ -81,7 +81,6 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
       return res.status(400).json({ message: "Ride is no longer pending." });
     }
 
-    // Add to ignored drivers and continue matching
     ride.ignoredDrivers.push(req.user.id);
     await ride.save();
 
@@ -90,6 +89,38 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
     res.json({ message: "Ride declined" });
   } catch (err) {
     console.error("[driver-ride-decline]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Cancel a ride (by driver)
+router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
+    
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+
+    if (ride.status === "completed" || ride.status === "cancelled") {
+      return res.status(400).json({ message: "Ride is already completed or cancelled." });
+    }
+
+    if (ride.status === "trip_started") {
+      return res.status(400).json({ message: "Cannot cancel a ride that has already started." });
+    }
+
+    ride.status = "cancelled";
+    await ride.save();
+
+    broadcastToRide(ride._id, "ride_cancelled", { reason: "The driver has cancelled the ride." });
+
+    // Free up driver
+    await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
+
+    res.json({ message: "Ride cancelled successfully", ride });
+  } catch (err) {
+    console.error("[driver-ride-cancel]", err);
     res.status(500).json({ message: "Server error" });
   }
 });
