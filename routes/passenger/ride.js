@@ -40,9 +40,22 @@ router.get("/history", authenticate, requireRole("passenger"), async (req, res) 
   }
 });
 
+// Helper for Geofencing
+const isWithinCabanatuan = (lat, lng) => {
+  const minLat = 15.42;
+  const maxLat = 15.58;
+  const minLng = 120.90;
+  const maxLng = 121.05;
+  return lat >= minLat && lat <= maxLat && lng >= minLng && lng <= maxLng;
+};
+
 // Request a new ride
 router.post("/request", authenticate, requireRole("passenger"), async (req, res) => {
   const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
+
+  if (!isWithinCabanatuan(pickup.latitude, pickup.longitude) || !isWithinCabanatuan(dropoff.latitude, dropoff.longitude)) {
+    return res.status(400).json({ message: "Sorry, pickup and dropoff locations must be within Cabanatuan City." });
+  }
 
   try {
     // Check if passenger already has an active ride
