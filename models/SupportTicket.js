@@ -22,6 +22,10 @@ const supportTicketSchema = new mongoose.Schema(
       enum: ["open", "resolved"],
       default: "open",
     },
+    hasUnreadAdmin: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );

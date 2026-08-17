@@ -6,6 +6,7 @@ const DriverApplication = require("../../models/DriverApplication");
 const User = require("../../models/User");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { logAdminAction } = require("../../utils/auditLogger");
+const { broadcastToAdmins } = require("../../services/socket");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -268,6 +269,8 @@ router.post("/:id/approve", actionLimiter, async (req, res) => {
     await logAdminAction(req, req.user.id, "", "DRIVER_APPROVED", `Approved driver application for ${application.firstName} ${application.lastName} (License: ${application.licenseNumber})`);
 
     await sendNotification(application.firstName, application.lastName, application.mobileNumber);
+    
+    broadcastToAdmins('application_resolved', { applicationId: application._id });
 
     return res.status(200).json({ message: "Application approved. Driver account created." });
 
@@ -314,6 +317,8 @@ router.post("/:id/reject", actionLimiter, async (req, res) => {
     await DriverApplication.findByIdAndDelete(application._id);
 
     await logAdminAction(req, req.user.id, "", "DRIVER_REJECTED", `Rejected driver application for ${application.firstName} ${application.lastName} (License: ${application.licenseNumber}). Reason: ${reason || "None provided"}`);
+    
+    broadcastToAdmins('application_resolved', { applicationId: application._id });
 
     return res.status(200).json({
       message: "Application rejected and removed.",

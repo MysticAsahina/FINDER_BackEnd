@@ -121,6 +121,12 @@ router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   const messages = await ChatMessage.find({ ticketId: ticket._id })
     .sort({ createdAt: 1 });
 
+  // Clear unread status if admin is viewing
+  if (req.user.role === "admin" && ticket.hasUnreadAdmin !== false) {
+    ticket.hasUnreadAdmin = false;
+    await ticket.save();
+  }
+
   return res.status(200).json({ messages, status: ticket.status });
 });
 
@@ -172,6 +178,9 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
 
   // Touch the ticket's updatedAt so it floats to the top of the list
   ticket.updatedAt = new Date();
+  if (req.user.role !== "admin") {
+    ticket.hasUnreadAdmin = true;
+  }
   await ticket.save();
 
   // Broadcast to anyone currently viewing this ticket in real-time
@@ -181,6 +190,7 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
   broadcastToAdmins("ticket_updated", {
     ticketId: ticket._id.toString(),
     updatedAt: ticket.updatedAt,
+    senderRole: req.user.role,
   });
 
   // Build push notification body

@@ -87,6 +87,14 @@ router.post("/:rideId/chat", authenticate, requireRole("driver"), messageLimiter
       id: newMessage.id,
     });
 
+    // Send push notification to passenger
+    const { sendPushToUser } = require("../../services/notification");
+    const pushText = hasText ? text : (mediaType === "image" ? "📷 Sent an image" : "🎥 Sent a video");
+    sendPushToUser(ride.passengerId, "New message from Driver", pushText, {
+      type: "ride_chat",
+      rideId: ride._id.toString()
+    });
+
     res.json({ message: newMessage });
   } catch (err) {
     console.error("[driver-chat-post]", err);

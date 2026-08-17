@@ -399,7 +399,7 @@ router.post("/verify-mpin", async (req, res) => {
     if (!driver) return res.status(404).json({ message: "User not found." });
 
     const isMatch = await driver.compareMpin(mpin);
-    if (!isMatch) return res.status(401).json({ message: "Invalid mpin." });
+    if (!isMatch) return res.status(401).json({ message: "Invalid MPIN." });
 
     return res.status(200).json({ verified: true });
   } catch (err) {
