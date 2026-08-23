@@ -28,6 +28,7 @@ const chatMediaRouter           = require('./routes/chatMedia');
 const adminDashboardRouter        = require('./routes/admin/dashboard');
 const adminAnalyticsRouter         = require('./routes/admin/analytics');
 const adminBadgesRouter            = require('./routes/admin/badges');
+const paymentRouter                 = require('./routes/passenger/payment');
 
 const http = require("http");
 const socketService = require("./services/socket");
@@ -40,7 +41,13 @@ app.use(cors({
   origin: true,
   credentials: true
 }));
-app.use(express.json());
+
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf; // This saves the raw text so we can verify the PayMongo signature
+  }
+}));
+
 app.use(cookieParser());
 
 app.use("/auth",               authRouter);
@@ -70,8 +77,10 @@ app.use('/passenger/settings', passengerSettingsRouter);
 app.use('/maps', mapsRouter);
 app.use('/chat', chatMediaRouter);
 
+app.use('/passenger/payment', paymentRouter);
+
 app.get('/', (_req, res) => {
-  res.send('Hello World.');
+  res.send('No errors here, probably.');
 });
 
 // Health check

@@ -41,6 +41,7 @@ const rideSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        "payment_pending",  // Waiting for passenger to complete payment in PayMongo
         "pending",          // Looking for driver
         "driver_assigned",  // Driver accepted, on the way
         "arrived_pickup",   // Driver at pickup location, waiting for passenger / cash
@@ -52,8 +53,12 @@ const rideSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["cash", "ewallet"],
+      enum: ["cash", "ewallet", "paymongo"],
       default: "cash",
+    },
+    paymongoLinkId: {
+      type: String,
+      default: null,
     },
     fare: {
       type: Number,
