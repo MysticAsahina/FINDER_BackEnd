@@ -1,7 +1,20 @@
 const express = require('express');
+const rateLimit = require("express-rate-limit");
 const router = express.Router();
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+
+// Rate Limiter for Maps API requests
+const mapsLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // Limit each IP to 60 requests per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),
+  message: { error: 'Too many requests to Maps API. Please try again later.' }
+});
+
+router.use(mapsLimiter);
 
 // Helper function to build query string
 const buildQueryString = (queryObj) => {

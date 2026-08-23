@@ -1,4 +1,6 @@
 const express = require("express");
+const axios = require("axios");
+const rateLimit = require("express-rate-limit");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
@@ -7,6 +9,20 @@ const { matchRide } = require("../../services/rideMatcher");
 const { broadcastToRide, joinUserToRoom } = require("../../services/socket");
 
 const router = express.Router();
+
+const rideRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP or User to 5 ride requests per 15 minutes
+  message: { 
+    message: "You are requesting too many rides. Please try again in 15 minutes." 
+  },
+  // We can limit by User ID instead of IP
+  keyGenerator: (req, res) => {
+    // We are guaranteed to have a user ID here because of the 'authenticate' middleware
+    // We return it as a string to completely bypass the IPv6 IP-fallback warning
+    return String(req.user.id);
+  }
+});
 
 // Get current active ride
 router.get("/current", authenticate, requireRole("passenger"), async (req, res) => {
@@ -50,7 +66,7 @@ const isWithinCabanatuan = (lat, lng) => {
 };
 
 // Request a new ride
-router.post("/request", authenticate, requireRole("passenger"), async (req, res) => {
+router.post("/request", authenticate, requireRole("passenger"), rideRequestLimiter, async (req, res) => {
   const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
 
   if (!isWithinCabanatuan(pickup.latitude, pickup.longitude) || !isWithinCabanatuan(dropoff.latitude, dropoff.longitude)) {
@@ -69,9 +85,9 @@ router.post("/request", authenticate, requireRole("passenger"), async (req, res)
       return res.status(400).json({ message: "You already have an active ride." });
     }
 
-    if (paymentMethod !== "cash") {
+    if (paymentMethod !== "cash" && paymentMethod !== "paymongo") {
       console.log("Unsupported payment method:", paymentMethod);
-      return res.status(400).json({ message: "Only cash payments are supported currently." });
+      return res.status(400).json({ message: "Unsupported payment method." });
     }
 
     // Fetch fare settings
@@ -101,23 +117,59 @@ router.post("/request", authenticate, requireRole("passenger"), async (req, res)
           coordinates: [dropoff.longitude, dropoff.latitude],
         },
       },
-      paymentMethod: "cash",
+      paymentMethod: paymentMethod,
+      status: paymentMethod === "paymongo" ? "payment_pending" : "pending",
       fare: calculatedFare,
       distanceKm: distanceKm || 0,
       durationMins: durationMins || 0,
     });
 
-    console.log("Ride before save:", JSON.stringify(ride, null, 2));
+    let checkout_url = null;
+
+    if (paymentMethod === "paymongo") {
+      try {
+        const options = {
+            method: 'POST',
+            url: 'https://api.paymongo.com/v1/links',
+            headers: {
+                accept: 'application/json',
+                'content-type': 'application/json',
+            },
+            auth: {
+                username: process.env.PAYMONGO_SECRET_KEY,
+                password: ''
+            },
+            data: {
+                data: {
+                    attributes: {
+                        amount: Math.round(calculatedFare * 100), // in centavos
+                        description: `Ride Fare - Finder App`,
+                        remarks: ride._id.toString(), // Store ride ID for webhook matching
+                        success_url: req.body.successUrl || `finderapp://payment-success` // Deep link back to app
+                    }
+                }
+            }
+        };
+        const pmResponse = await axios.request(options);
+        checkout_url = pmResponse.data.data.attributes.checkout_url;
+        ride.paymongoLinkId = pmResponse.data.data.id;
+      } catch (pmError) {
+        console.error("PayMongo Error:", pmError.response?.data || pmError.message);
+        return res.status(500).json({ message: 'Failed to create payment link.' });
+      }
+    }
 
     await ride.save();
 
     // Instantly join the passenger to the ride's socket room
     joinUserToRoom(req.user.id, ride._id.toString());
 
-    // Start matching process asynchronously
-    matchRide(ride._id);
+    if (paymentMethod === "cash") {
+      // Start matching process asynchronously only if cash (paymongo will start on webhook)
+      matchRide(ride._id);
+    }
 
-    res.status(201).json({ ride });
+    res.status(201).json({ ride, checkout_url });
   } catch (err) {
     console.error("[passenger-ride-request]", err);
     res.status(500).json({ message: "Server error" });
