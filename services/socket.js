@@ -73,7 +73,35 @@ function init(server) {
       socket.leave(rideId);
     });
 
+    // ── WebRTC Signaling ───────────────────────────────────────────────────
+    socket.on("webrtc_call_initiated", ({ rideId, callerName, isVideo }) => {
+      // Broadcast to the other party in the ride room
+      socket.to(rideId.toString()).emit("webrtc_call_initiated", { callerName, isVideo });
+    });
 
+    socket.on("webrtc_call_accepted", ({ rideId }) => {
+      socket.to(rideId.toString()).emit("webrtc_call_accepted");
+    });
+
+    socket.on("webrtc_call_denied", ({ rideId }) => {
+      socket.to(rideId.toString()).emit("webrtc_call_denied");
+    });
+
+    socket.on("webrtc_offer", ({ rideId, offer }) => {
+      socket.to(rideId.toString()).emit("webrtc_offer", offer);
+    });
+
+    socket.on("webrtc_answer", ({ rideId, answer }) => {
+      socket.to(rideId.toString()).emit("webrtc_answer", answer);
+    });
+
+    socket.on("webrtc_ice_candidate", ({ rideId, candidate }) => {
+      socket.to(rideId.toString()).emit("webrtc_ice_candidate", candidate);
+    });
+
+    socket.on("webrtc_end_call", ({ rideId }) => {
+      socket.to(rideId.toString()).emit("webrtc_end_call");
+    });
 
     // Driver sends their location during an active trip
     socket.on("driver_location_update", ({ rideId, location }) => {
