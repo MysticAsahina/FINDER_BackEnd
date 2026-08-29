@@ -209,7 +209,7 @@ async function sendOtp(mobileNumber) {
     throw err;
   } */
 
-  console.log("Code: " + code);
+  console.log("SMS Code for " + recipient + ": " + code);
   otpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
 }
 

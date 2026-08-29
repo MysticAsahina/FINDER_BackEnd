@@ -115,7 +115,7 @@ async function sendOtp(mobileNumber) {
     }),
   });
 
-  console.log("Code: " + code);
+  console.log("SMS Code for " + recipient + ": " + code);
   const data = await response.json();
 
   if (!response.ok) {
@@ -126,7 +126,7 @@ async function sendOtp(mobileNumber) {
   } */
 
   // Keyed by mobileNumber — one pending registration per number at a time
-  console.log("Code: " + code);
+  console.log("SMS Code for " + recipient + ": " + code);
   regOtpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
 }
 

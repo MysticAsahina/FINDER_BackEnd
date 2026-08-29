@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
 const { logAdminAction } = require("../utils/auditLogger");
-const { sendSmsOtp: sendOtp, verifyOtp } = require("../utils/otpManager");
+const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
 
 const router = express.Router();
 
@@ -30,10 +30,10 @@ const otpSubmitLimiter = rateLimit({
   message: { message: "Too many OTP attempts. Please wait before trying again." },
 });
 
-// OTP resend: max 1 per 5 minutes per IP
+// OTP resend: max 3 per 15 minutes per IP
 const otpResendLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 1,
+  windowMs: 15 * 60 * 1000,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many resend requests. Please wait before requesting another OTP." },
@@ -182,11 +182,11 @@ async function loginAdmin(req, res) {
   }
 
   const rememberMe = req.body.rememberMe === true;
-  await sendOtp(user._id, user.mobileNumber);
+  await createAndSendEmailOtp(user._id, user.email);
 
   return res.status(200).json({
     pendingToken: signPendingToken(user, rememberMe),
-    message: "Credentials verified. OTP sent to your registered mobile number.",
+    message: "Credentials verified. OTP sent to your registered email address.",
   });
 }
 
@@ -284,7 +284,11 @@ router.post("/resend-otp", otpResendLimiter, async (req, res) => {
     const user = await User.findById(decoded.id);
     if (!user) return res.status(404).json({ message: "User not found." });
 
-    await sendOtp(user._id, user.mobileNumber);
+    if (user.role === "admin") {
+      await createAndSendEmailOtp(user._id, user.email);
+    } else {
+      await sendOtp(user._id, user.mobileNumber);
+    }
 
     return res.status(200).json({ message: "OTP resent." });
   } catch (err) {

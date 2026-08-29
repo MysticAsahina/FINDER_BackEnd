@@ -135,12 +135,12 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
       });
     }
 
-    // Neither changed (just name/password), send to current mobile to verify identity
-    await sendSmsOtp(otpKey, updatedUser.mobileNumber, updateData);
+    // Neither changed (just name/password), send to current email to verify identity
+    await createAndSendEmailOtp(otpKey, updatedUser.email, updateData);
     return res.status(200).json({
         pendingProfileOtp: true,
-        destination: "current mobile",
-        message: "An OTP has been sent to your registered mobile number to verify these changes.",
+        destination: "current email",
+        message: "An OTP has been sent to your registered email address to verify these changes.",
     });
   } catch (err) {
     console.error("[admin-edit-profile]", err);
