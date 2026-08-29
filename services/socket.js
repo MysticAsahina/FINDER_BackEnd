@@ -76,7 +76,7 @@ function init(server) {
     // ── WebRTC Signaling ───────────────────────────────────────────────────
     socket.on("webrtc_call_initiated", ({ rideId, callerName, isVideo }) => {
       // Broadcast to the other party in the ride room
-      socket.to(rideId.toString()).emit("webrtc_call_initiated", { callerName, isVideo });
+      socket.to(rideId.toString()).emit("webrtc_call_initiated", { callerName, isVideo, rideId });
     });
 
     socket.on("webrtc_call_accepted", ({ rideId }) => {
@@ -101,6 +101,10 @@ function init(server) {
 
     socket.on("webrtc_end_call", ({ rideId }) => {
       socket.to(rideId.toString()).emit("webrtc_end_call");
+    });
+
+    socket.on("webrtc_video_toggled", ({ rideId, isVideoOn }) => {
+      socket.to(rideId.toString()).emit("webrtc_video_toggled", { isVideoOn });
     });
 
     // Driver sends their location during an active trip
