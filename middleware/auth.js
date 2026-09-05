@@ -1,11 +1,12 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
 /**
  * Verifies the Bearer token in the Authorization header.
  * Attaches the decoded payload to req.user.
  * Rejects pending tokens (those issued before OTP verification).
  */
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -20,6 +21,16 @@ function authenticate(req, res, next) {
 
     if (decoded.pending) {
       return res.status(401).json({ message: "Token is not yet fully authenticated." });
+    }
+
+    const user = await User.findById(decoded.id).select("tokenVersion");
+    if (!user) {
+      return res.status(401).json({ message: "User no longer exists." });
+    }
+
+    const tokenV = decoded.tokenVersion || 0;
+    if (user.tokenVersion !== tokenV) {
+      return res.status(401).json({ message: "Session expired due to login on another device." });
     }
 
     req.user = decoded;
