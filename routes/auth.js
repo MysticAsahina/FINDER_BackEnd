@@ -33,7 +33,7 @@ const otpSubmitLimiter = rateLimit({
 // OTP resend: max 3 per 15 minutes per IP
 const otpResendLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 3,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many resend requests. Please wait before requesting another OTP." },
