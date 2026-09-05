@@ -38,7 +38,7 @@ const server = http.createServer(app);
 const port   = process.env.PORT;
 
 app.use(cors({
-  origin: ['https://finder-admin.mcreysc980.workers.dev/'],
+  origin: ['https://finder-admin.mcreysc980.workers.dev'],
   credentials: true
 }));
 
