@@ -11,7 +11,7 @@ const activeUsers = new Map();
 
 function init(server) {
   io = new Server(server, {
-    cors: { origin: "*" },
+    cors: { origin: "https://finder-admin.mcreysc980.workers.dev/" },
   });
 
   // ── Authentication middleware ──────────────────────────────────────────
