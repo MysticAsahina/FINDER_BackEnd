@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
 const { logAdminAction } = require("../utils/auditLogger");
 const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
+const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
 
 const router = express.Router();
 
@@ -39,34 +40,29 @@ const otpResendLimiter = rateLimit({
   message: { message: "Too many resend requests. Please wait before requesting another OTP." },
 });
 
+// Forgot Password: max 5 requests per 15 minutes per IP
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many forgot password requests. Please try again later." },
+});
+
 // ---------------------------------------------------------------------------
 // Field validators
 // Each function returns an error message string if invalid, null if valid.
 // ---------------------------------------------------------------------------
 
-function validateEmailFormat(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) return "Invalid email format.";
-  return null;
-}
 
-function validateEmailLength(email) {
-  if (email.length > 254) return "Email is too long.";
-  return null;
-}
 
-function validatePasswordLength(password) {
-  // Upper cap prevents bcrypt DoS via oversized inputs
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
 
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
+
+
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Input sanitization
@@ -128,7 +124,7 @@ function sanitizeMobileLogin(body) {
 
 function signAccessToken(user) {
   return jwt.sign(
-    { id: user._id, role: user.role },
+    { id: user._id, role: user.role, tokenVersion: user.tokenVersion || 0 },
     process.env.ACCESS_SECRET,
     { expiresIn: "15m" }
   );
@@ -136,7 +132,7 @@ function signAccessToken(user) {
 
 function signRefreshToken(user, rememberMe = false) {
   return jwt.sign(
-    { id: user._id, rememberMe: !!rememberMe },
+    { id: user._id, rememberMe: !!rememberMe, tokenVersion: user.tokenVersion || 0 },
     process.env.REFRESH_SECRET,
     { expiresIn: rememberMe ? process.env.EXPIRY_REMEMBER : process.env.EXPIRY_REGULAR }
   );
@@ -145,6 +141,22 @@ function signRefreshToken(user, rememberMe = false) {
 function signPendingToken(user, rememberMe = false) {
   return jwt.sign(
     { id: user._id, role: user.role, pending: true, rememberMe: !!rememberMe },
+    process.env.PENDING_SECRET,
+    { expiresIn: "10m" }
+  );
+}
+
+function signForgotPasswordPendingToken(user) {
+  return jwt.sign(
+    { id: user._id, role: user.role, forgotPasswordPending: true },
+    process.env.PENDING_SECRET,
+    { expiresIn: "10m" }
+  );
+}
+
+function signResetPasswordToken(user) {
+  return jwt.sign(
+    { id: user._id, role: user.role, resetPasswordAllowed: true },
     process.env.PENDING_SECRET,
     { expiresIn: "10m" }
   );
@@ -332,6 +344,8 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
     }
 
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user, decoded.rememberMe);
 
@@ -355,10 +369,10 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       mobileNumber: user.mobileNumber,
+      email: user.email || null,
       emergencyContact: user.emergencyContact || null,
     };
 
-    if (user.role === "admin")  userPayload.email   = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
     return res.status(200).json({ accessToken, refreshToken, user: userPayload });
@@ -441,6 +455,13 @@ router.post("/refresh", async (req, res) => {
       });
     }
 
+    const tokenV = decoded.tokenVersion || 0;
+    if (user.tokenVersion !== tokenV) {
+      return res.status(401).json({
+        message: "Session expired due to login on another device."
+      });
+    }
+
     const accessToken = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user, decoded.rememberMe);
 
@@ -460,10 +481,10 @@ router.post("/refresh", async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         mobileNumber: user.mobileNumber,
+        email: user.email || null,
         emergencyContact: user.emergencyContact || null,
     };
 
-    if (user.role === "admin")  userPayload.email   = user.email;
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
     return res.json({ accessToken, refreshToken: newRefreshToken, user: userPayload });
@@ -509,6 +530,132 @@ router.post("/logout", async (req, res) => {
       // Ignored
     }
     return res.status(200).json({ message: "Logged out." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/forgot-password
+// ---------------------------------------------------------------------------
+router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
+  let { mobileNumber } = req.body;
+
+  if (typeof mobileNumber !== "string") {
+    return res.status(400).json({ message: "Invalid input." });
+  }
+
+  mobileNumber = mobileNumber.trim();
+  const mobileError = validateMobileFormat(mobileNumber);
+  if (mobileError) return res.status(400).json({ message: mobileError });
+
+  try {
+    const user = await User.findOne({ mobileNumber });
+    if (!user) {
+      // Don't reveal if user exists or not for security? 
+      // It's a mobile number, usually fine. But returning 404 is okay.
+      return res.status(404).json({ message: "No account found with this number." });
+    }
+
+    // Send OTP
+    await sendOtp(user._id, user.mobileNumber);
+
+    return res.status(200).json({
+      token: signForgotPasswordPendingToken(user),
+      message: "OTP sent to your registered mobile number.",
+    });
+  } catch (err) {
+    console.error("[auth/forgot-password]", err);
+    return res.status(500).json({ message: "Failed to process request." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/forgot-password/verify-otp
+// ---------------------------------------------------------------------------
+router.post("/forgot-password/verify-otp", otpSubmitLimiter, async (req, res) => {
+  const { code } = req.body;
+  const authHeader = req.headers.authorization;
+
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.PENDING_SECRET);
+
+    if (!decoded.forgotPasswordPending) {
+      return res.status(400).json({ message: "A valid pending token is required." });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const otpResult = verifyOtp(user._id, code);
+    if (!otpResult.valid) {
+      return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+    }
+
+    return res.status(200).json({
+      token: signResetPasswordToken(user),
+      message: "OTP verified.",
+    });
+  } catch (err) {
+    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Invalid or expired token." });
+    }
+    console.error("[auth/forgot-password/verify-otp]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/forgot-password/reset
+// ---------------------------------------------------------------------------
+router.post("/forgot-password/reset", forgotPasswordLimiter, async (req, res) => {
+  const { password, confirmPassword } = req.body;
+  const authHeader = req.headers.authorization;
+
+  if (typeof password !== "string" || typeof confirmPassword !== "string") {
+    return res.status(400).json({ message: "Invalid input." });
+  }
+
+  if (password !== confirmPassword) {
+    return res.status(400).json({ message: "Passwords do not match." });
+  }
+
+  const passwordError = validatePasswordPolicy(password);
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
+  }
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.PENDING_SECRET);
+
+    if (!decoded.resetPasswordAllowed) {
+      return res.status(400).json({ message: "A valid reset token is required." });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    user.password = password;
+    // Let the pre-save hook hash it
+    await user.save();
+
+    return res.status(200).json({ message: "Password has been reset successfully." });
+  } catch (err) {
+    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Invalid or expired token." });
+    }
+    console.error("[auth/forgot-password/reset]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 

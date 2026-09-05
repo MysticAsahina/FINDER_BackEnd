@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const { validateName, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
 
 const router = express.Router();
 
@@ -49,24 +50,11 @@ const completeLimiter = rateLimit({
 // Field validators
 // ---------------------------------------------------------------------------
 
-function validateMobileFormat(mobileNumber) {
-  // Stored format: 09XXXXXXXXX (11 digits)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
 
-function validatePasswordLength(password) {
-  if (password.length < 8) return "Password must be at least 8 characters.";
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
 
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
+
+
+
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -298,7 +286,7 @@ router.post("/complete", completeLimiter, async (req, res) => {
     const lastNameError = validateName(lastName, "Last name");
     if (lastNameError) return res.status(400).json({ message: lastNameError });
 
-    const passwordError = validatePasswordLength(password);
+    const passwordError = validatePasswordPolicy(password);
     if (passwordError) return res.status(400).json({ message: passwordError });
 
     if (password !== confirmPassword.trim()) {

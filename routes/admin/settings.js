@@ -2,6 +2,7 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const SystemSettings = require("../../models/SystemSettings");
 const { logAdminAction } = require("../../utils/auditLogger");
+const { validateFareValue } = require('../../utils/validators');
 
 const router = express.Router();
 
@@ -11,16 +12,7 @@ router.use(authenticate, requireRole("admin"));
 // Field validators
 // ---------------------------------------------------------------------------
 
-function validateFareValue(value, fieldName) {
-  if (value == null || value === "") return `${fieldName} is required.`;
-  
-  const num = Number(value);
-  if (isNaN(num)) return `${fieldName} must be a valid number.`;
-  if (num < 0) return `${fieldName} cannot be negative.`;
-  if (num > 10000) return `${fieldName} exceeds maximum allowed value (10,000).`;
-  
-  return null;
-}
+
 
 // GET /admin/settings/fare
 router.get("/fare", async (req, res) => {

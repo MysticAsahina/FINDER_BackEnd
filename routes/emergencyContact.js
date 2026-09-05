@@ -2,24 +2,16 @@ const express = require("express");
 const rateLimit = require("express-rate-limit");
 const { authenticate } = require("../middleware/auth");
 const User = require("../models/User");
+const { validateName, validateMobileFormat } = require('../utils/validators');
 
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
 // Field validators
 // ---------------------------------------------------------------------------
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
 
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
+
+
 
 // ---------------------------------------------------------------------------
 // Rate limiters

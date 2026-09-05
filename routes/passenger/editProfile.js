@@ -4,44 +4,25 @@ const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
+const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateName, validateMobileFormat } = require('../../utils/validators');
 
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
 // Field validators
 // Each function returns an error message string if invalid, null if valid.
-// TODO: Group these into a single file and import as needed.
+
 // ---------------------------------------------------------------------------
 
-function validateEmailFormat(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) return "Invalid email format.";
-  return null;
-}
 
-function validateEmailLength(email) {
-  if (email.length > 254) return "Email is too long.";
-  return null;
-}
 
-function validatePasswordLength(password) {
-  // Upper cap prevents bcrypt DoS via oversized inputs
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
 
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
 
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
+
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Rate limiters

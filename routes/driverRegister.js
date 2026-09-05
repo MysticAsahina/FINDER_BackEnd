@@ -7,6 +7,7 @@ const cron = require("node-cron");
 const DriverApplication = require("../models/DriverApplication");
 const User = require("../models/User");
 const { broadcastToAdmins } = require("../services/socket");
+const { validatePasswordLength, validateName, validateMobileFormat, validateMpinFormat, validateUrl, validateLicenseNumber, validatePlateNumber, validateMotorcycleBrand, validateLicenseExpDate } = require('../utils/validators');
 
 // Configure Cloudinary from env
 cloudinary.config({
@@ -29,18 +30,12 @@ async function cleanupTempUploads() {
   try {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const result = await cloudinary.api.resources({
-      type: "upload",
-      prefix: "driver-applications/",
-      tags: true,
+    const result = await cloudinary.api.resources_by_tag("driver-reg-temp", {
       max_results: 500,
     });
 
     const toDelete = result.resources
-      .filter(r =>
-        r.tags?.includes("driver-reg-temp") &&
-        r.created_at < oneDayAgo
-      )
+      .filter(r => r.created_at < oneDayAgo)
       .map(r => r.public_id);
 
     if (toDelete.length > 0) {
@@ -103,60 +98,23 @@ const submitLimiter = rateLimit({
 // Field validators
 // ---------------------------------------------------------------------------
 
-function validateMobileFormat(mobileNumber) {
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
 
-function validatePasswordLength(password) {
-  if (password.length < 8) return "Password must be at least 8 characters.";
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
 
-function validateMpinFormat(mpin) {
-  if (!/^\d{4}$/.test(mpin)) return "MPIN must be exactly 4 digits.";
-  return null;
-}
 
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
 
-function validateUrl(value, field) {
-  if (!value || typeof value !== "string" || !value.startsWith("https://")) {
-    return `${field} must be a valid Cloudinary URL.`;
-  }
-  return null;
-}
 
-function validateLicenseNumber(value) {
-  if (!value || !value.trim()) return "License number is required.";
-  if (value.trim().length > 20) return "License number is too long.";
-  return null;
-}
 
-function validatePlateNumber(value) {
-  if (!value || !value.trim()) return "Plate number is required.";
-  if (value.trim().length > 10) return "Plate number is too long.";
-  return null;
-}
 
-function validateMotorcycleBrand(value) {
-  if (!value || !value.trim()) return "Motorcycle brand is required.";
-  if (value.trim().length > 50) return "Motorcycle brand is too long.";
-  return null;
-}
 
-function validateLicenseExpDate(value) {
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return "Invalid license expiration date.";
-  if (date < new Date()) return "License expiration date must be in the future.";
-  return null;
-}
+
+
+
+
+
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Helpers

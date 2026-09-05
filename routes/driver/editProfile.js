@@ -3,6 +3,7 @@ const rateLimit = require("express-rate-limit");
 const User = require("../../models/User");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
+const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateName, validateMobileFormat, validateMpinFormat } = require('../../utils/validators');
 
 const router = express.Router();
 
@@ -10,37 +11,17 @@ const router = express.Router();
 // Field validators
 // ---------------------------------------------------------------------------
 
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
 
-function validateMobileFormat(mobileNumber) {
-  if (!/^09\d{9}$/.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
 
-function validateEmailFormat(email) {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Invalid email format.";
-  return null;
-}
 
-function validateEmailLength(email) {
-  if (email.length > 254) return "Email is too long.";
-  return null;
-}
 
-function validatePasswordLength(password) {
-  if (password.length < 8) return "Password must be at least 8 characters.";
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
 
-function validateMpin(mpin) {
-  if (!/^\d{4}$/.test(mpin)) return "MPIN must be exactly 4 digits.";
-  return null;
-}
+
+
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // Rate limiter: max 10 attempts per 15 minutes per IP
@@ -143,7 +124,7 @@ router.patch(
 
       // ── mpin (driver-specific) ─────────────────────────────────────
       if (req.body.mpin !== undefined) {
-        const mpinErr = validateMpin(req.body.mpin);
+        const mpinErr = validateMpinFormat(req.body.mpin);
         if (mpinErr) {
           errors.push(mpinErr);
         } else if (req.body.mpin !== req.body.confirmMpin) {
