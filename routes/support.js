@@ -4,6 +4,7 @@ const { authenticate } = require("../middleware/auth");
 const User           = require("../models/User");
 const SupportTicket  = require("../models/SupportTicket");
 const ChatMessage    = require("../models/ChatMessage");
+const Ride           = require("../models/Ride");
 const { broadcastToTicket, broadcastTicketResolved, broadcastToAdmins, isUserOnline } = require("../services/socket");
 const { sendPushToUser } = require("../services/notification");
 const { logAdminAction } = require("../utils/auditLogger");
@@ -18,6 +19,16 @@ const messageLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),
   message: { message: "You are sending messages too quickly. Please slow down." },
+});
+
+// Rate limiter — max 5 ticket creations per hour per user
+const ticketLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),
+  message: { message: "Too many tickets created. Please try again later." },
 });
 
 const router = express.Router();
@@ -46,12 +57,13 @@ const VALID_CATEGORIES = [
   "App Issue",
   "Account & Profile",
   "General Support",
+  "Ride Report",
   "Other"
 ];
 
 // Create a new support ticket (passengers and drivers only)
-router.post("/tickets", authenticate, async (req, res) => {
-  const { subject } = req.body;
+router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
+  const { subject, rideId } = req.body;
 
   if (req.user.role === "admin") {
     return res.status(403).json({ message: "Admins cannot create tickets." });
@@ -66,6 +78,26 @@ router.post("/tickets", authenticate, async (req, res) => {
     return res.status(400).json({ message: "Invalid subject category." });
   }
 
+  // If a rideId is provided, validate it belongs to the user and is < 7 days old
+  if (rideId) {
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+    
+    // Ensure the ride belongs to the user (either passenger or driver)
+    if (ride.passengerId.toString() !== req.user.id && ride.driverId?.toString() !== req.user.id) {
+      return res.status(403).json({ message: "You don't have permission to report this ride." });
+    }
+
+    // Check if ride is older than 7 days
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const rideDate = ride.tripCompletedAt || ride.createdAt;
+    if (Date.now() - new Date(rideDate).getTime() > SEVEN_DAYS_MS) {
+      return res.status(400).json({ message: "You can only report rides completed within the last 7 days." });
+    }
+  }
+
   const openTicketsCount = await SupportTicket.countDocuments({
     userId: req.user.id,
     status: "open"
@@ -75,11 +107,16 @@ router.post("/tickets", authenticate, async (req, res) => {
     return res.status(400).json({ message: "You have reached the maximum number of open tickets (3). Please wait for an existing ticket to be resolved." });
   }
 
-  const ticket = await SupportTicket.create({
+  const ticketData = {
     userId: req.user.id,
     userRole: req.user.role,
     subject: trimmedSubject,
-  });
+  };
+  if (rideId) {
+    ticketData.rideId = rideId;
+  }
+
+  const ticket = await SupportTicket.create(ticketData);
 
   // Populate user info so admin panel can display it immediately
   await ticket.populate("userId", "firstName lastName role");
