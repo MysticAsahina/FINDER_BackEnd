@@ -64,7 +64,7 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
         status,
         trips: rStats.completed,
         rate: `${rate}%`,
-        rating: "5.0", // Placeholder
+        rating: (details.averageRating && details.totalReviews > 0) ? details.averageRating.toFixed(1) : "5.0",
         vehicle: `${details.motorcycleBrand || "Unknown"} • ${details.plateNumber || "N/A"}`,
         motorcycleBrand: details.motorcycleBrand,
         plateNumber: details.plateNumber,

@@ -102,6 +102,16 @@ const rideSchema = new mongoose.Schema(
       id: { type: String }, // For frontend React keys
       createdAt: { type: Date, default: Date.now }
     }],
+    rating: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: null,
+    },
+    reviewComment: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

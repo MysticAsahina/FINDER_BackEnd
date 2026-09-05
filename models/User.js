@@ -22,6 +22,9 @@ const driverDetailsSchema = new mongoose.Schema(
     motorcycleBrand:  { type: String, required: true },
     plateNumber:      { type: String, required: true },
     mpin:             { type: String, default: null }, // optional; hashed on save
+    ratingSum:        { type: Number, default: 0 },
+    totalReviews:     { type: Number, default: 0 },
+    averageRating:    { type: Number, default: 5.0 },
   },
   { _id: false } // no separate _id for the subdocument
 );
@@ -81,6 +84,11 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
     // --- Emergency Contact (optional for all users) ---
     emergencyContact: {
       type: {
