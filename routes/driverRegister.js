@@ -55,13 +55,6 @@ cron.schedule("0 2 * * *", cleanupTempUploads, {
   timezone: "Asia/Manila",
 });
 
-const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-
-// ---------------------------------------------------------------------------
-// OTP store — keyed by mobileNumber
-// ---------------------------------------------------------------------------
-const otpStore = new Map();
-
 // ---------------------------------------------------------------------------
 // Rate limiters
 // ---------------------------------------------------------------------------
@@ -120,10 +113,6 @@ const submitLimiter = rateLimit({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function generateOtp() {
-  return String(crypto.randomInt(100000, 999999));
-}
-
 function signDriverRegToken(firstName, lastName, mobileNumber) {
   return jwt.sign(
     { firstName, lastName, mobileNumber, type: "driver-registration" },
@@ -132,60 +121,7 @@ function signDriverRegToken(firstName, lastName, mobileNumber) {
   );
 }
 
-// Converts number to E164 format, used for OTP
-function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
-}
 
-async function sendOtp(mobileNumber) {
-  const code = generateOtp();
-  const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  const recipient = toE164(mobileNumber);
-
-  const apiUsername = process.env.SMS_GATE_USERNAME;
-  const apiPassword = process.env.SMS_GATE_PASSWORD;
-
-  /* Temporary remove due to lack of load
-  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phoneNumbers: [recipient],
-      textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
-    }),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    const err = new Error(data.message || "Failed to send OTP.");
-    err.smsStatus = response.status;
-    err.smsCode = data.code;
-    throw err;
-  } */
-
-  console.log("SMS Code for " + recipient + ": " + code);
-  otpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
-}
-
-function verifyOtp(mobileNumber, submittedCode) {
-  const entry = otpStore.get(mobileNumber);
-
-  if (!entry) return false;
-  if (Date.now() > entry.expiresAt) { otpStore.delete(mobileNumber); return false; }
-
-  if (submittedCode !== entry.code) {
-    entry.attempts += 1;
-    if (entry.attempts >= 10) otpStore.delete(mobileNumber);
-    return false;
-  }
-
-  otpStore.delete(mobileNumber);
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // POST /driver-register/send-otp
@@ -234,7 +170,7 @@ router.post("/send-otp", otpLimiter, async (req, res) => {
       return res.status(409).json({ message: "This number is already registered as a driver." });
     }
 
-    await sendOtp(mobileNumber);
+    await sendSmsOtp(mobileNumber, mobileNumber);
 
     // Embed personal info in the token so it carries forward
     const token = jwt.sign(
@@ -271,7 +207,7 @@ router.post("/resend-otp", otpLimiter, async (req, res) => {
       return res.status(400).json({ message: "Invalid token." });
     }
 
-    await sendOtp(decoded.mobileNumber);
+    await sendSmsOtp(decoded.mobileNumber, decoded.mobileNumber);
 
     return res.status(200).json({ message: "OTP resent." });
   } catch (err) {
@@ -313,9 +249,9 @@ router.post("/verify-otp", rateLimit({
       return res.status(400).json({ message: "Invalid token." });
     }
 
-    const isValid = verifyOtp(decoded.mobileNumber, code);
-    if (!isValid) {
-      return res.status(401).json({ message: "Invalid or expired OTP." });
+    const otpResult = verifyOtp(decoded.mobileNumber, code);
+    if (!otpResult.valid) {
+      return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
     }
 
     // Re-sign the same token — OTP is now verified, same payload carries forward
