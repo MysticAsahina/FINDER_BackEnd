@@ -33,7 +33,10 @@ const paymentRouter                 = require('./routes/passenger/payment');
 const http = require("http");
 const socketService = require("./services/socket");
 
+require('dns').setDefaultResultOrder('ipv4first');
+
 const app    = express();
+app.set('trust proxy', 1); // Trust the proxy from Render
 const server = http.createServer(app);
 const port   = process.env.PORT;
 
