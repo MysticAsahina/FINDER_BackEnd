@@ -56,6 +56,18 @@ router.get("/history", authenticate, requireRole("passenger"), async (req, res) 
   }
 });
 
+// Get active driver count
+router.get("/active-drivers/count", authenticate, requireRole("passenger"), async (req, res) => {
+  try {
+    const count = await ActiveDriver.countDocuments({ isOnline: true });
+    const availableCount = await ActiveDriver.countDocuments({ isOnline: true, isBusy: false });
+    res.json({ totalOnline: count, available: availableCount });
+  } catch (err) {
+    console.error("[passenger-active-drivers-count]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Helper for Geofencing
 const isWithinCabanatuan = (lat, lng) => {
   const minLat = 15.42;
@@ -258,6 +270,60 @@ router.post("/:id/override", authenticate, requireRole("passenger"), async (req,
     res.json({ message: "Ride status overridden successfully", ride });
   } catch (err) {
     console.error("[passenger-ride-override]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+const reviewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each User to 10 reviews per 15 minutes
+  message: { 
+    message: "Too many review attempts. Please try again later." 
+  },
+  keyGenerator: (req, res) => String(req.user.id)
+});
+
+// Submit a review for a completed ride
+router.post("/:id/review", authenticate, requireRole("passenger"), reviewLimiter, async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+    
+    if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+      return res.status(400).json({ message: "Rating must be a number between 1 and 5." });
+    }
+
+    const ride = await Ride.findOne({ _id: req.params.id, passengerId: req.user.id });
+    if (!ride) {
+      return res.status(404).json({ message: "Ride not found." });
+    }
+
+    if (ride.status !== "completed") {
+      return res.status(400).json({ message: "You can only review completed rides." });
+    }
+
+    if (ride.rating) {
+      return res.status(400).json({ message: "You have already reviewed this ride." });
+    }
+
+    // Save review on Ride
+    ride.rating = rating;
+    ride.reviewComment = comment || null;
+    await ride.save();
+
+    // Update driver's average rating
+    const User = require("../../models/User");
+    const driver = await User.findById(ride.driverId);
+    
+    if (driver && driver.driverDetails) {
+      driver.driverDetails.totalReviews += 1;
+      driver.driverDetails.ratingSum += rating;
+      driver.driverDetails.averageRating = driver.driverDetails.ratingSum / driver.driverDetails.totalReviews;
+      await driver.save();
+    }
+
+    res.json({ message: "Review submitted successfully", ride });
+  } catch (err) {
+    console.error("[passenger-ride-review]", err);
     res.status(500).json({ message: "Server error" });
   }
 });
