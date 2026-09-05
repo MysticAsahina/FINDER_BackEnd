@@ -21,34 +21,46 @@ function toE164(mobileNumber) {
 async function sendSmsOtp(key, mobileNumber, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  const recipient = toE164(mobileNumber);
+  
+  // PhilSMS requires 639XXXXXXXXX format
+  let philsmsNumber = mobileNumber;
+  if (philsmsNumber.startsWith('+63')) {
+    philsmsNumber = philsmsNumber.slice(1);
+  } else if (philsmsNumber.startsWith('09')) {
+    philsmsNumber = '63' + philsmsNumber.slice(1);
+  }
 
-  const apiUsername = process.env.SMS_GATE_USERNAME;
-  const apiPassword = process.env.SMS_GATE_PASSWORD;
+  const apiToken = process.env.PHILSMS_API_TOKEN;
 
-  /* Temporary remove due to lack of load
-  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phoneNumbers: [ recipient ],
-      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
-    }),
-  });
+  if (apiToken) {
+    try {
+      const response = await fetch("https://dashboard.philsms.com/api/v3/sms/send", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + apiToken,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          recipient: philsmsNumber,
+          sender_id: "FINDER",
+          type: "plain",
+          message: `Your Finder OTP is ${code}. Do not share this with anyone.`
+        }),
+      });
 
-  const data = await response.json();
+      const data = await response.json();
+      if (data.status !== "success") {
+        throw new Error(data.message || "Failed to send OTP via PhilSMS");
+      }
+    } catch (err) {
+      console.error("PhilSMS Error:", err);
+      throw err;
+    }
+  } else {
+    console.log("[MOCK SMS] Would have sent code " + code + " to " + philsmsNumber);
+  }
 
-  if (!response.ok) {
-    const err = new Error(data.message || "Failed to send OTP.");
-    err.smsStatus = response.status;
-    err.smsCode   = data.code;
-    throw err;
-  } */
-
-  console.log("SMS Code for " + recipient + ": " + code);
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
 }
 
