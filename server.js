@@ -99,6 +99,12 @@ app.get("/health", (_req, res) => {
   }
 });
 
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ message: "Internal server error." });
+});
+
 mongoose.connect(process.env.MONGO_URI, {
   serverSelectionTimeoutMS: 5000, 
   maxIdleTimeMS: 60000, // Close idle connections before the cloud firewall silently drops them
@@ -112,4 +118,5 @@ mongoose.connect(process.env.MONGO_URI, {
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err);
+    process.exit(1);
   });
