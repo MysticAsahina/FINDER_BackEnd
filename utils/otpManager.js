@@ -43,6 +43,7 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
         },
         body: JSON.stringify({
           recipient: philsmsNumber,
+          sender_id: "PhilSMS",
           type: "plain",
           message: `Your Finder OTP is ${code}. Do not share this with anyone.`
         }),
