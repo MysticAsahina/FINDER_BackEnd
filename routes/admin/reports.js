@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const Ride = require('../../models/Ride');
+const { authenticate, requireRole } = require('../../middleware/auth');
 
 // GET /admin/reports
-router.get('/', async (req, res) => {
+router.get('/', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const { month, year, page = 1, limit = 10 } = req.query;
 

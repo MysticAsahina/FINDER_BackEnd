@@ -35,6 +35,7 @@ const router = express.Router();
 
 // Register or refresh a device's Expo push token
 router.post("/push-token", authenticate, async (req, res) => {
+  try {
   const { pushToken } = req.body;
 
   if (!pushToken) {
@@ -48,6 +49,10 @@ router.post("/push-token", authenticate, async (req, res) => {
   });
 
   return res.status(200).json({ message: "Push token registered." });
+  } catch (error) {
+    console.error("[support/push-token]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 const VALID_CATEGORIES = [
@@ -63,6 +68,7 @@ const VALID_CATEGORIES = [
 
 // Create a new support ticket (passengers and drivers only)
 router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
+  try {
   const { subject, rideId } = req.body;
 
   if (req.user.role === "admin") {
@@ -125,10 +131,15 @@ router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
   broadcastToAdmins("new_ticket", ticket);
 
   return res.status(201).json({ ticket });
+  } catch (error) {
+    console.error("[support/post-tickets]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 // Fetch tickets — admin sees all, others see only their own
 router.get("/tickets", authenticate, async (req, res) => {
+  try {
   const filter = req.user.role === "admin" ? {} : { userId: req.user.id };
   
   if (req.user.role === "admin" && req.query.role) {
@@ -140,10 +151,15 @@ router.get("/tickets", authenticate, async (req, res) => {
     .sort({ updatedAt: -1 });
 
   return res.status(200).json({ tickets });
+  } catch (error) {
+    console.error("[support/get-tickets]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 // Fetch message history for a specific ticket
 router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
+  try {
   const ticket = await SupportTicket.findById(req.params.ticketId);
 
   if (!ticket) {
@@ -165,10 +181,15 @@ router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   }
 
   return res.status(200).json({ messages, status: ticket.status });
+  } catch (error) {
+    console.error("[support/get-messages]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 // Send a message in a ticket (text, media, or both)
 router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (req, res) => {
+  try {
   const { body, mediaUrl, mediaType } = req.body;
 
   const hasText = body && typeof body === "string" && body.trim();
@@ -260,10 +281,15 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
   }
 
   return res.status(201).json({ message });
+  } catch (error) {
+    console.error("[support/post-messages]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 // Resolve a ticket
 router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
+  try {
   if (req.user.role !== "admin") {
     return res.status(403).json({ message: "Only admins can resolve tickets." });
   }
@@ -303,6 +329,10 @@ router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
   });
 
   return res.status(200).json({ ticket });
+  } catch (error) {
+    console.error("[support/resolve-ticket]", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 });
 
 module.exports = router;

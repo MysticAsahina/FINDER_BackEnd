@@ -142,7 +142,10 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             return res.status(400).json({ message: "Ride is already cancelled or completed." });
         }
 
-        if ((status === "arrived_pickup" || status === "completed") && latitude !== undefined && longitude !== undefined) {
+        if (status === "arrived_pickup" || status === "completed") {
+            if (latitude === undefined || longitude === undefined) {
+                return res.status(400).json({ message: "Latitude and longitude are required for this status update." });
+            }
             let targetCoords;
             if (status === "arrived_pickup") {
                 targetCoords = ride.pickup.coordinates.coordinates; // [lng, lat]

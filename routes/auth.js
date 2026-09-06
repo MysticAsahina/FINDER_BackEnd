@@ -49,6 +49,15 @@ const forgotPasswordLimiter = rateLimit({
   message: { message: "Too many forgot password requests. Please try again later." },
 });
 
+// MPIN submit: max 5 attempts per 15 minutes per IP
+const mpinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many MPIN attempts. Please wait before trying again." },
+});
+
 // ---------------------------------------------------------------------------
 // Field validators
 // Each function returns an error message string if invalid, null if valid.
@@ -390,7 +399,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /auth/verify-mpin  (driver only, requires real JWT)
 // ---------------------------------------------------------------------------
-router.post("/verify-mpin", async (req, res) => {
+router.post("/verify-mpin", mpinLimiter, async (req, res) => {
   const { mpin } = req.body;
   const authHeader = req.headers.authorization;
 

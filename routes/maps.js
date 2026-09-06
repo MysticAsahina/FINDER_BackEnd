@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require("express-rate-limit");
 const router = express.Router();
+const { authenticate } = require('../middleware/auth');
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -14,6 +15,7 @@ const mapsLimiter = rateLimit({
   message: { error: 'Too many requests to Maps API. Please try again later.' }
 });
 
+router.use(authenticate);
 router.use(mapsLimiter);
 
 // Helper function to build query string
