@@ -30,13 +30,47 @@ async function cleanupTempUploads() {
   try {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const result = await cloudinary.api.resources_by_tag("driver-reg-temp", {
+    const result = await cloudinary.api.resources({
+      type: 'upload',
+      prefix: 'driver-applications/',
       max_results: 500,
     });
 
-    const toDelete = result.resources
-      .filter(r => r.created_at < oneDayAgo)
-      .map(r => r.public_id);
+    const toDelete = [];
+    for (const r of result.resources) {
+      if (r.created_at >= oneDayAgo) continue;
+
+      const appFound = await DriverApplication.findOne({
+        $or: [
+          { "cloudinaryPublicIds.licenseImgFront": r.public_id },
+          { "cloudinaryPublicIds.licenseImgBack": r.public_id },
+          { "cloudinaryPublicIds.faceImg": r.public_id },
+          { "cloudinaryPublicIds.idImg": r.public_id },
+          { "cloudinaryPublicIds.tricycleOR": r.public_id },
+          { "cloudinaryPublicIds.regCert": r.public_id },
+          { "cloudinaryPublicIds.tricycleImgFront": r.public_id },
+          { "cloudinaryPublicIds.tricycleImgBack": r.public_id }
+        ]
+      });
+      if (appFound) continue;
+
+      const userFound = await User.findOne({
+        role: "driver",
+        $or: [
+          { "driverDetails.licenseImgFront": { $regex: r.public_id } },
+          { "driverDetails.licenseImgBack": { $regex: r.public_id } },
+          { "driverDetails.faceImg": { $regex: r.public_id } },
+          { "driverDetails.idImg": { $regex: r.public_id } },
+          { "driverDetails.tricycleOR": { $regex: r.public_id } },
+          { "driverDetails.regCert": { $regex: r.public_id } },
+          { "driverDetails.tricycleImgFront": { $regex: r.public_id } },
+          { "driverDetails.tricycleImgBack": { $regex: r.public_id } }
+        ]
+      });
+      if (userFound) continue;
+
+      toDelete.push(r.public_id);
+    }
 
     if (toDelete.length > 0) {
       await cloudinary.api.delete_resources(toDelete);
