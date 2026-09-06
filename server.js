@@ -97,7 +97,10 @@ app.get("/health", (_req, res) => {
   }
 });
 
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, {
+  serverSelectionTimeoutMS: 5000, 
+  maxIdleTimeMS: 60000, // Close idle connections before the cloud firewall silently drops them
+})
   .then(() => {
     console.log("MongoDB connected");
     socketService.init(server);
