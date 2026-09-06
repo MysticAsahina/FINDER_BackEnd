@@ -48,14 +48,33 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
         headers["Authorization"] = "Basic " + Buffer.from(smsgateUsername + ":" + smsgatePassword).toString("base64");
       }
 
-      // Endpoint is usually /message or /api/message, we'll append /message to the base URL
-      const response = await fetch(`${smsgateUrl.replace(/\/$/, '')}/message`, {
+      let endpoint = smsgateUrl.replace(/\/$/, '');
+      
+      // Auto-append the correct path if the user just provided the base URL
+      if (!endpoint.endsWith('/message') && !endpoint.endsWith('/messages')) {
+        if (endpoint.includes('api.sms-gate.app') || endpoint.includes('3rdparty')) {
+          endpoint += '/messages';
+        } else {
+          endpoint += '/message';
+        }
+      }
+
+      // The Public Cloud API uses a different JSON structure than the Local API
+      const isCloud = endpoint.endsWith('/messages');
+      const payloadBody = isCloud
+        ? {
+            textMessage: { text: `Your Finder OTP is ${code}. Do not share this with anyone.` },
+            phoneNumbers: [formattedNumber]
+          }
+        : {
+            message: `Your Finder OTP is ${code}. Do not share this with anyone.`,
+            phoneNumbers: [formattedNumber]
+          };
+
+      const response = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          phoneNumbers: [formattedNumber],
-          message: `Your Finder OTP is ${code}. Do not share this with anyone.`
-        }),
+        body: JSON.stringify(payloadBody),
       });
 
       if (!response.ok) {
