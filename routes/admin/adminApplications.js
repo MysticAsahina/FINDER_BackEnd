@@ -119,7 +119,8 @@ router.get("/", readLimiter, async (req, res) => {
     const query = { status };
 
     if (search) {
-      const regex = new RegExp(search, "i");
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, "i");
       query.$or = [
         { firstName: regex },
         { lastName: regex },

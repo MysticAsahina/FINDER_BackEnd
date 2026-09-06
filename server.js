@@ -3,6 +3,7 @@ const express  = require('express');
 const cors     = require('cors');
 const cookieParser = require('cookie-parser');
 const mongoose = require("mongoose");
+const helmet   = require('helmet');
 
 const authRouter             = require("./routes/auth");
 const registerRouter         = require('./routes/register');
@@ -36,6 +37,7 @@ const socketService = require("./services/socket");
 require('dns').setDefaultResultOrder('ipv4first');
 
 const app    = express();
+app.use(helmet());
 app.set('trust proxy', 1); // Trust the proxy from Render
 const server = http.createServer(app);
 const port   = process.env.PORT;

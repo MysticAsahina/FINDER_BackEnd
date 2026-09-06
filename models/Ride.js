@@ -116,4 +116,10 @@ const rideSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+rideSchema.index({ passengerId: 1 });
+rideSchema.index({ driverId: 1 });
+rideSchema.index({ status: 1 });
+rideSchema.index({ createdAt: -1 });
+rideSchema.index({ paymongoLinkId: 1 });
+
 module.exports = mongoose.model("Ride", rideSchema);

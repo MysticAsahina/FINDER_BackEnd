@@ -79,13 +79,21 @@ const isWithinCabanatuan = (lat, lng) => {
 
 // Request a new ride
 router.post("/request", authenticate, requireRole("passenger"), rideRequestLimiter, async (req, res) => {
-  const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
-
-  if (!isWithinCabanatuan(pickup.latitude, pickup.longitude) || !isWithinCabanatuan(dropoff.latitude, dropoff.longitude)) {
-    return res.status(400).json({ message: "Sorry, pickup and dropoff locations must be within Cabanatuan City." });
-  }
-
   try {
+    const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
+
+    if (!pickup || !pickup.latitude || !pickup.longitude || !dropoff || !dropoff.latitude || !dropoff.longitude) {
+      return res.status(400).json({ message: "Pickup and dropoff locations are required." });
+    }
+
+    if (!isWithinCabanatuan(pickup.latitude, pickup.longitude) || !isWithinCabanatuan(dropoff.latitude, dropoff.longitude)) {
+      return res.status(400).json({ message: "Sorry, pickup and dropoff locations must be within Cabanatuan City." });
+    }
+
+    if (distanceKm !== undefined && (typeof distanceKm !== 'number' || distanceKm < 0)) {
+      return res.status(400).json({ message: "Invalid distance." });
+    }
+
     // Check if passenger already has an active ride
     const existingRide = await Ride.findOne({
       passengerId: req.user.id,
