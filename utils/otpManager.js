@@ -30,6 +30,12 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
     formattedNumber = '+' + formattedNumber;
   }
 
+  // Save the OTP to memory BEFORE attempting to send it.
+  // If the SMS Gateway takes too long to respond and our 10-second timeout triggers,
+  // the SMS might still eventually reach the user's phone. By saving it first, 
+  // they can still successfully verify it!
+  otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
+
   const smsgateUrl = process.env.SMSGATE_API_URL;
   const smsgateToken = process.env.SMSGATE_API_TOKEN;
   const smsgateUsername = process.env.SMSGATE_USERNAME;
@@ -71,15 +77,40 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
             phoneNumbers: [formattedNumber]
           };
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payloadBody),
-      });
+      let response;
+      let retries = 3;
+      let lastError = null;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to send OTP via SMS Gateway. Status: ${response.status} - ${errorText}`);
+      while (retries > 0) {
+        try {
+          response = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(payloadBody),
+            signal: AbortSignal.timeout(10000)
+          });
+          
+          if (response.ok) break; // Success!
+          
+          if (response.status >= 500) {
+             throw new Error(`Server returned ${response.status}`);
+          } else {
+             break; // 4xx errors shouldn't be retried
+          }
+        } catch (err) {
+          lastError = err;
+          retries--;
+          if (retries > 0) {
+             console.log(`[SMS Gateway] Request failed (${err.message}). Retrying in 2 seconds...`);
+             await new Promise(res => setTimeout(res, 2000));
+          }
+        }
+      }
+
+      if (!response || !response.ok) {
+        const errorText = response ? await response.text() : lastError.message;
+        const status = response ? response.status : 'Network/Timeout';
+        throw new Error(`Failed to send OTP via SMS Gateway. Status: ${status} - ${errorText}`);
       }
     } catch (err) {
       console.error("SMS Gateway Error:", err);
@@ -88,17 +119,15 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
   } else {
     console.log("[MOCK SMS] Would have sent code " + code + " to " + formattedNumber);
   }
-
-  otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
 }
 
 async function createAndSendEmailOtp(key, emailAddress, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
 
-  await sendEmailOtp(emailAddress, code);
-
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
+
+  await sendEmailOtp(emailAddress, code);
 }
 
 function verifyOtp(key, submittedCode) {
