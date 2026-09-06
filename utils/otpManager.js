@@ -22,43 +22,52 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
   
-  // PhilSMS requires 639XXXXXXXXX format
-  let philsmsNumber = mobileNumber;
-  if (philsmsNumber.startsWith('+63')) {
-    philsmsNumber = philsmsNumber.slice(1);
-  } else if (philsmsNumber.startsWith('09')) {
-    philsmsNumber = '63' + philsmsNumber.slice(1);
+  // SMS Gateway for Android prefers E.164 format (+639XXXXXXXXX)
+  let formattedNumber = mobileNumber;
+  if (formattedNumber.startsWith('09')) {
+    formattedNumber = '+63' + formattedNumber.slice(1);
+  } else if (!formattedNumber.startsWith('+')) {
+    formattedNumber = '+' + formattedNumber;
   }
 
-  const apiToken = process.env.PHILSMS_API_TOKEN;
+  const smsgateUrl = process.env.SMSGATE_API_URL;
+  const smsgateToken = process.env.SMSGATE_API_TOKEN;
+  const smsgateUsername = process.env.SMSGATE_USERNAME;
+  const smsgatePassword = process.env.SMSGATE_PASSWORD;
 
-  if (apiToken) {
+  if (smsgateUrl) {
     try {
-      const response = await fetch("https://dashboard.philsms.com/api/v3/sms/send", {
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      };
+
+      if (smsgateToken) {
+        headers["Authorization"] = "Bearer " + smsgateToken;
+      } else if (smsgateUsername && smsgatePassword) {
+        headers["Authorization"] = "Basic " + Buffer.from(smsgateUsername + ":" + smsgatePassword).toString("base64");
+      }
+
+      // Endpoint is usually /message or /api/message, we'll append /message to the base URL
+      const response = await fetch(`${smsgateUrl.replace(/\/$/, '')}/message`, {
         method: "POST",
-        headers: {
-          "Authorization": "Bearer " + apiToken,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
+        headers,
         body: JSON.stringify({
-          recipient: philsmsNumber,
-          sender_id: "PhilSMS",
-          type: "plain",
+          phoneNumbers: [formattedNumber],
           message: `Your Finder OTP is ${code}. Do not share this with anyone.`
         }),
       });
 
-      const data = await response.json();
-      if (data.status !== "success") {
-        throw new Error(data.message || "Failed to send OTP via PhilSMS");
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to send OTP via SMS Gateway. Status: ${response.status} - ${errorText}`);
       }
     } catch (err) {
-      console.error("PhilSMS Error:", err);
+      console.error("SMS Gateway Error:", err);
       throw err;
     }
   } else {
-    console.log("[MOCK SMS] Would have sent code " + code + " to " + philsmsNumber);
+    console.log("[MOCK SMS] Would have sent code " + code + " to " + formattedNumber);
   }
 
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
