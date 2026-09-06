@@ -101,7 +101,6 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
     });
 
     if (existingRide) {
-      console.log("Existing ride found:", existingRide);
       return res.status(400).json({ message: "You already have an active ride." });
     }
 

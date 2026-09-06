@@ -35,7 +35,7 @@ router.post('/webhook', async (req, res) => {
             .digest('hex');
         // 4. Compare the signatures
         if (expectedSignature !== testSignature) {
-            console.error("Invalid Webhook Signature. Expected:", expectedSignature, "Got:", testSignature);
+            console.error("Invalid Webhook Signature.");
             return res.status(401).send('Unauthorized');
         }
         // 5. If signature is valid, proceed with ride processing
