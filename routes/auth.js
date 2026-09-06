@@ -534,6 +534,36 @@ router.post("/logout", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /auth/forgot-password/admin
+// ---------------------------------------------------------------------------
+router.post("/forgot-password/admin", forgotPasswordLimiter, async (req, res) => {
+  let { email } = req.body;
+
+  if (typeof email !== "string") {
+    return res.status(400).json({ message: "Invalid input." });
+  }
+
+  email = email.trim().toLowerCase();
+
+  try {
+    const user = await User.findOne({ email, role: "admin" });
+    if (!user) {
+      return res.status(404).json({ message: "No admin account found with this email." });
+    }
+
+    await createAndSendEmailOtp(user._id, user.email);
+
+    return res.status(200).json({
+      token: signForgotPasswordPendingToken(user),
+      message: "OTP sent to your registered email address.",
+    });
+  } catch (err) {
+    console.error("[auth/forgot-password/admin]", err);
+    return res.status(500).json({ message: "Failed to process request." });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /auth/forgot-password
 // ---------------------------------------------------------------------------
 router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
