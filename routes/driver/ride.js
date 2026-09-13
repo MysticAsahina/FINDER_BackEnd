@@ -156,7 +156,9 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             if (targetCoords && targetCoords.length === 2) {
                 const distance = getDistanceInMeters(latitude, longitude, targetCoords[1], targetCoords[0]);
                 if (distance > 100) {
+                    // Broadcast to room just in case, but also send directly to passenger's socket to prevent sync issues
                     broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
+                    sendToUser(ride.passengerId, "override_request", { rideId: ride._id, status });
                     return res.status(400).json({ code: "GPS_TOO_FAR", message: "You are too far from the location. Waiting for passenger override." });
                 }
             }

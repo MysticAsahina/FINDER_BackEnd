@@ -6,7 +6,7 @@ const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
 const SystemSettings = require("../../models/SystemSettings");
 const { matchRide } = require("../../services/rideMatcher");
-const { broadcastToRide, joinUserToRoom } = require("../../services/socket");
+const { broadcastToRide, joinUserToRoom, sendToUser } = require("../../services/socket");
 
 const router = express.Router();
 
@@ -260,12 +260,16 @@ router.post("/:id/override", authenticate, requireRole("passenger"), async (req,
     await ride.save();
 
     // Broadcast update so driver and passenger screens advance
-    broadcastToRide(ride._id, "ride_status_update", { 
+    const updatePayload = { 
       rideId: ride._id, 
       status, 
       actualDurationMins: ride.actualDurationMins, 
       actualDistanceKm: ride.actualDistanceKm 
-    });
+    };
+    broadcastToRide(ride._id, "ride_status_update", updatePayload);
+    if (ride.driverId) {
+        sendToUser(ride.driverId, "ride_status_update", updatePayload);
+    }
 
     if (status === "completed") {
       // Free up driver
