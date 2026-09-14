@@ -89,13 +89,20 @@ app.get('/', (_req, res) => {
 });
 
 // Health check
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
   const state = mongoose.connection.readyState;
-  // 0: disconnected, 1: connected, 2: connecting, 3: disconnecting
-  if (state === 1) {
+  if (state !== 1) {
+    return res.status(500).json({ status: "db-fail", readyState: state });
+  }
+
+  try {
+    // Send a real network packet to MongoDB to keep the TCP socket alive
+    // and verify the connection isn't a dead "zombie" socket.
+    await mongoose.connection.db.command({ ping: 1 });
     res.json({ status: "ok", uptime: process.uptime() });
-  } else {
-    res.status(500).json({ status: "db-fail", readyState: state });
+  } catch (error) {
+    console.error("Health check ping failed:", error);
+    res.status(500).json({ status: "db-fail", error: error.message });
   }
 });
 
