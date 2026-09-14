@@ -118,6 +118,16 @@ mongoose.connect(process.env.MONGO_URI, {
 })
   .then(() => {
     console.log("MongoDB connected");
+
+    // Internal Keep-Alive: Ping MongoDB every 3 minutes to prevent the cloud firewall 
+    // from silently dropping the TCP socket due to inactivity (usually drops after 4-5 mins).
+    // This runs completely independently of your 10-minute external health checker!
+    setInterval(() => {
+      if (mongoose.connection.readyState === 1) {
+        mongoose.connection.db.command({ ping: 1 }).catch(console.error);
+      }
+    }, 3 * 60 * 1000);
+
     socketService.init(server);
     server.listen(port, () => {
       console.log(`Listening on port ${port}`);
