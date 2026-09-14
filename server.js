@@ -113,7 +113,8 @@ app.use((err, req, res, next) => {
 });
 
 mongoose.connect(process.env.MONGO_URI, {
-  serverSelectionTimeoutMS: 5000, 
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 10000, // 10s (staggered below the 15s client timeout)
   maxIdleTimeMS: 60000, // Close idle connections before the cloud firewall silently drops them
 })
   .then(() => {
