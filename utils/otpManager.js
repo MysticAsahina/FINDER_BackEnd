@@ -13,22 +13,19 @@ function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
 }
 
-// Converts number to E164 format, used for OTP
+// Converts number to E164 format, used for OTP, use if SMS API requires E164 format (+639XXXXXXXXX)
 function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
+  if (mobileNumber.startsWith('09')) {
+    return '+63' + mobileNumber.slice(1);
+  } else if (!mobileNumber.startsWith('+')) {
+    return '+' + mobileNumber;
+  }
+  return mobileNumber;
 }
 
 async function sendSmsOtp(key, mobileNumber, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  
-  // SMS Gateway for Android prefers E.164 format (+639XXXXXXXXX)
-  let formattedNumber = mobileNumber;
-  if (formattedNumber.startsWith('09')) {
-    formattedNumber = '+63' + formattedNumber.slice(1);
-  } else if (!formattedNumber.startsWith('+')) {
-    formattedNumber = '+' + formattedNumber;
-  }
 
   // Save the OTP to memory BEFORE attempting to send it.
   // If the SMS Gateway takes too long to respond and our 10-second timeout triggers,
@@ -36,46 +33,17 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
   // they can still successfully verify it!
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
 
-  const smsgateUrl = process.env.SMSGATE_API_URL;
-  const smsgateToken = process.env.SMSGATE_API_TOKEN;
-  const smsgateUsername = process.env.SMSGATE_USERNAME;
-  const smsgatePassword = process.env.SMSGATE_PASSWORD;
+  const iProgSmsToken = process.env.IPROGSMS_API_TOKEN;
+  const iProgSmsUrl = process.env.IPROGSMS_API_URL;
 
-  if (smsgateUrl) {
+  if (iProgSmsUrl) {
     try {
       const headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
       };
 
-      if (smsgateToken) {
-        headers["Authorization"] = "Bearer " + smsgateToken;
-      } else if (smsgateUsername && smsgatePassword) {
-        headers["Authorization"] = "Basic " + Buffer.from(smsgateUsername + ":" + smsgatePassword).toString("base64");
-      }
-
-      let endpoint = smsgateUrl.replace(/\/$/, '');
-      
-      // Auto-append the correct path if the user just provided the base URL
-      if (!endpoint.endsWith('/message') && !endpoint.endsWith('/messages')) {
-        if (endpoint.includes('api.sms-gate.app') || endpoint.includes('3rdparty')) {
-          endpoint += '/messages';
-        } else {
-          endpoint += '/message';
-        }
-      }
-
-      // The Public Cloud API uses a different JSON structure than the Local API
-      const isCloud = endpoint.endsWith('/messages');
-      const payloadBody = isCloud
-        ? {
-            textMessage: { text: `Your Finder OTP is ${code}. Do not share this with anyone.` },
-            phoneNumbers: [formattedNumber]
-          }
-        : {
-            message: `Your Finder OTP is ${code}. Do not share this with anyone.`,
-            phoneNumbers: [formattedNumber]
-          };
+      let endpoint = iProgSmsUrl.replace(/\/$/, '');
 
       let response;
       let retries = 3;
@@ -86,7 +54,11 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
           response = await fetch(endpoint, {
             method: "POST",
             headers,
-            body: JSON.stringify(payloadBody),
+            body: JSON.stringify({
+              api_token: iProgSmsToken,
+              phone_number: mobileNumber,
+              message: `Your Finder OTP is ${code}. Do not share this with anyone.`
+            }),
             signal: AbortSignal.timeout(10000)
           });
           
@@ -101,7 +73,7 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
           lastError = err;
           retries--;
           if (retries > 0) {
-             console.log(`[SMS Gateway] Request failed (${err.message}). Retrying in 2 seconds...`);
+             console.error(`[IProgSMS] Request failed (${err.message}). Retrying in 2 seconds...`);
              await new Promise(res => setTimeout(res, 2000));
           }
         }
@@ -110,14 +82,15 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       if (!response || !response.ok) {
         const errorText = response ? await response.text() : lastError.message;
         const status = response ? response.status : 'Network/Timeout';
-        throw new Error(`Failed to send OTP via SMS Gateway. Status: ${status} - ${errorText}`);
+        throw new Error(`Failed to send OTP via IProgSMS. Status: ${status} - ${errorText}`);
       }
     } catch (err) {
-      console.error("SMS Gateway Error:", err);
+      console.error("[IProgSMS] SMS Gateway Error:", err);
       throw err;
     }
   } else {
-    console.log("[MOCK SMS] Would have sent code " + code + " to " + formattedNumber);
+    // FALLBACK: If there's no API URL in the .env, print the OTP to the console for testing purposes.
+    console.log(`[MOCK SMS] Would have sent code ${code} to ${mobileNumber}`);
   }
 }
 
