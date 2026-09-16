@@ -45,44 +45,20 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
 
       let endpoint = iProgSmsUrl.replace(/\/$/, '');
 
-      let response;
-      let retries = 3;
-      let lastError = null;
-
-      while (retries > 0) {
-        try {
-          response = await fetch(endpoint, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              api_token: iProgSmsToken,
-              phone_number: mobileNumber,
-              message: `Your Finder OTP is ${code}. Do not share this with anyone.`
-            }),
-            signal: AbortSignal.timeout(10000)
-          });
-          
-          if (response.ok) break; // Success!
-          
-          if (response.status >= 500) {
-             throw new Error(`Server returned ${response.status}`);
-          } else {
-             break; // 4xx errors shouldn't be retried
-          }
-        } catch (err) {
-          lastError = err;
-          retries--;
-          if (retries > 0) {
-             console.error(`[IProgSMS] Request failed (${err.message}). Retrying in 2 seconds...`);
-             await new Promise(res => setTimeout(res, 2000));
-          }
-        }
-      }
-
-      if (!response || !response.ok) {
-        const errorText = response ? await response.text() : lastError.message;
-        const status = response ? response.status : 'Network/Timeout';
-        throw new Error(`Failed to send OTP via IProgSMS. Status: ${status} - ${errorText}`);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          api_token: iProgSmsToken,
+          phone_number: mobileNumber,
+          message: `Your Finder OTP is ${code}. Do not share this with anyone.`
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to send OTP via IProgSMS. Status: ${response.status} - ${errorText}`);
       }
     } catch (err) {
       console.error("[IProgSMS] SMS Gateway Error:", err);
