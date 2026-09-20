@@ -49,7 +49,8 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       const payloadBody = {
         api_token: iProgSmsToken,
         phone_number: mobileNumber,
-        message: `Finder app code: ${code}`
+        message: `Finder app code: ${code}`,
+        sms_provider: 1 // Trying alternative routing since 0 is failing silently at the telco
       };
 
       console.log(`[IProgSMS] Sending request to ${endpoint}`);
