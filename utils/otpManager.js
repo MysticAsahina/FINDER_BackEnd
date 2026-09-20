@@ -23,6 +23,43 @@ function toE164(mobileNumber) {
   return mobileNumber;
 }
 
+async function sendSms(mobileNumber, message) {
+  const iProgSmsToken = process.env.IPROGSMS_API_TOKEN;
+  const iProgSmsUrl = process.env.IPROGSMS_API_URL;
+
+  if (iProgSmsUrl) {
+    try {
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      };
+
+      let endpoint = iProgSmsUrl.replace(/\/$/, '');
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          api_token: iProgSmsToken,
+          phone_number: mobileNumber,
+          message: message
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to send SMS via IProgSMS. Status: ${response.status} - ${errorText}`);
+      }
+    } catch (err) {
+      console.error("[IProgSMS] SMS Gateway Error:", err);
+      throw err;
+    }
+  } else {
+    console.log(`[MOCK SMS] Would have sent to ${mobileNumber}: "${message}"`);
+  }
+}
+
 async function sendSmsOtp(key, mobileNumber, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
@@ -107,6 +144,7 @@ function verifyOtp(key, submittedCode) {
 }
 
 module.exports = {
+  sendSms,
   sendSmsOtp,
   createAndSendEmailOtp,
   verifyOtp,
