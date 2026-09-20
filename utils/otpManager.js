@@ -38,30 +38,53 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
 
   if (iProgSmsUrl) {
     try {
+      console.log(`[IProgSMS] Preparing to send OTP to: ${mobileNumber}`);
+      
       const headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
       };
 
       let endpoint = iProgSmsUrl.replace(/\/$/, '');
+      const payloadBody = {
+        api_token: iProgSmsToken,
+        phone_number: mobileNumber,
+        message: `Your Finder OTP is ${code}. Do not share this with anyone.`
+      };
+
+      console.log(`[IProgSMS] Sending request to ${endpoint}`);
+      // Do not log the raw token in production, but for debugging we log the keys
+      console.log(`[IProgSMS] Payload keys: ${Object.keys(payloadBody).join(', ')}`);
 
       const response = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          api_token: iProgSmsToken,
-          phone_number: mobileNumber,
-          message: `Your Finder OTP is ${code}. Do not share this with anyone.`
-        }),
+        body: JSON.stringify(payloadBody),
         signal: AbortSignal.timeout(5000)
       });
       
+      const responseText = await response.text();
+      console.log(`[IProgSMS] Received response status: ${response.status} ${response.statusText}`);
+      console.log(`[IProgSMS] Response body: ${responseText}`);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to send OTP via IProgSMS. Status: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to send OTP via IProgSMS. Status: ${response.status} - ${responseText}`);
       }
+      
+      // Some APIs return 200 OK but include an error message in the body
+      try {
+        const jsonResponse = JSON.parse(responseText);
+        if (jsonResponse.status === 'error' || jsonResponse.status === false || jsonResponse.success === false) {
+           console.warn(`[IProgSMS] API returned 200 OK but indicates failure in body:`, jsonResponse);
+        }
+      } catch (e) {
+        // Not JSON, ignore
+      }
+
     } catch (err) {
-      console.error("[IProgSMS] SMS Gateway Error:", err);
+      console.error("[IProgSMS] SMS Gateway Error:", err.message || err);
+      // Don't throw if we want them to still be able to use the mock OTP or if we don't want to crash the login flow, 
+      // but throwing is better so the frontend knows it failed.
       throw err;
     }
   } else {
