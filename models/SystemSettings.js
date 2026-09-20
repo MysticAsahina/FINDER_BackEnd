@@ -24,6 +24,14 @@ const systemSettingsSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    ordinanceUrl: {
+      type: String,
+      default: null,
+    },
+    ordinancePublicId: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );
