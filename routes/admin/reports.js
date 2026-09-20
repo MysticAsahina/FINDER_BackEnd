@@ -38,8 +38,10 @@ router.get('/', authenticate, requireRole('admin'), async (req, res) => {
       }
     }
 
+    const User = require('../../models/User');
+
     // Run parallel queries: count total, get paginated, and aggregate stats
-    const [totalTrips, trips, statsAgg, supportMessagesCount, rideMessagesAgg] = await Promise.all([
+    const [totalTrips, trips, statsAgg, supportMessagesCount, rideMessagesAgg, registeredPassengers, registeredDrivers, activeDrivers, inactiveDrivers] = await Promise.all([
       Ride.countDocuments(query),
       Ride.find(query)
         .populate('driverId', 'firstName lastName')
@@ -66,15 +68,21 @@ router.get('/', authenticate, requireRole('admin'), async (req, res) => {
         { $match: query.createdAt ? { createdAt: query.createdAt } : {} },
         { $project: { numMessages: { $size: { $ifNull: ["$chatMessages", []] } } } },
         { $group: { _id: null, total: { $sum: "$numMessages" } } }
-      ])
+      ]),
+      User.countDocuments({ role: 'passenger', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
+      User.countDocuments({ role: 'driver', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
+      User.countDocuments({ role: 'driver', isOnline: true, ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
+      User.countDocuments({ role: 'driver', isOnline: false, ...(query.createdAt ? { createdAt: query.createdAt } : {}) })
     ]);
 
     // Format stats
     let totalCompleted = 0;
+    let totalCancelled = 0;
     let totalCount = 0;
     
     if (statsAgg.length > 0) {
       totalCompleted = statsAgg[0].totalCompleted;
+      totalCancelled = statsAgg[0].totalCancelled;
       totalCount = statsAgg[0].totalCompleted + statsAgg[0].totalCancelled;
     }
 
@@ -112,9 +120,14 @@ router.get('/', authenticate, requireRole('admin'), async (req, res) => {
       stats: {
         totalTrips: totalCount,
         completedTrips: totalCompleted,
+        cancelledTrips: totalCancelled,
         completedRate: parseFloat(completedRate),
         averageDailyTrips: parseFloat(averageDailyTrips),
-        totalMessages: totalMessages
+        totalMessages: totalMessages,
+        registeredPassengers,
+        registeredDrivers,
+        activeDrivers,
+        inactiveDrivers
       }
     });
 
