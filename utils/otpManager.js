@@ -49,7 +49,7 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       const payloadBody = {
         api_token: iProgSmsToken,
         phone_number: mobileNumber,
-        message: `Your Finder OTP is ${code}. Do not share this with anyone.`
+        message: `Finder app code: ${code}`
       };
 
       console.log(`[IProgSMS] Sending request to ${endpoint}`);
