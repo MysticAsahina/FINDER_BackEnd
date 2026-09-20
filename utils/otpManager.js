@@ -38,8 +38,6 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
 
   if (iProgSmsUrl) {
     try {
-      console.log(`[IProgSMS] Preparing to send OTP to: ${mobileNumber}`);
-      
       const headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
@@ -50,12 +48,8 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
         api_token: iProgSmsToken,
         phone_number: mobileNumber,
         message: `Finder app code: ${code}`,
-        sms_provider: 1 // Trying alternative routing since 0 is failing silently at the telco
+        sms_provider: 0
       };
-
-      console.log(`[IProgSMS] Sending request to ${endpoint}`);
-      // Do not log the raw token in production, but for debugging we log the keys
-      console.log(`[IProgSMS] Payload keys: ${Object.keys(payloadBody).join(', ')}`);
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -65,27 +59,15 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       });
       
       const responseText = await response.text();
-      console.log(`[IProgSMS] Received response status: ${response.status} ${response.statusText}`);
-      console.log(`[IProgSMS] Response body: ${responseText}`);
 
       if (!response.ok) {
         throw new Error(`Failed to send OTP via IProgSMS. Status: ${response.status} - ${responseText}`);
       }
       
-      // Some APIs return 200 OK but include an error message in the body
-      try {
-        const jsonResponse = JSON.parse(responseText);
-        if (jsonResponse.status === 'error' || jsonResponse.status === false || jsonResponse.success === false) {
-           console.warn(`[IProgSMS] API returned 200 OK but indicates failure in body:`, jsonResponse);
-        }
-      } catch (e) {
-        // Not JSON, ignore
-      }
+      console.log(`[IProgSMS] Successfully queued OTP to ${mobileNumber}`);
 
     } catch (err) {
       console.error("[IProgSMS] SMS Gateway Error:", err.message || err);
-      // Don't throw if we want them to still be able to use the mock OTP or if we don't want to crash the login flow, 
-      // but throwing is better so the frontend knows it failed.
       throw err;
     }
   } else {
