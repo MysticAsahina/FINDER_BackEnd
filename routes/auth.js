@@ -267,9 +267,11 @@ const strategies = {
   driver:    loginDriver,
 };
 
+const axios = require("axios");
+
 // POST /auth/login
 router.post("/login", loginLimiter, async (req, res) => {
-  const { role } = req.body;
+  const { role, captchaToken } = req.body;
 
   if (!role || !strategies[role]) {
     return res.status(400).json({
@@ -277,11 +279,32 @@ router.post("/login", loginLimiter, async (req, res) => {
     });
   }
 
+  if (role === "admin") {
+    if (!captchaToken) {
+      return res.status(400).json({ message: "Please complete the CAPTCHA." });
+    }
+
+    try {
+      const response = await axios.post(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${captchaToken}`,
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+      );
+
+      if (!response.data.success) {
+        return res.status(400).json({ message: "CAPTCHA verification failed. Please try again." });
+      }
+    } catch (err) {
+      console.error("[Turnstile Verification Error]", err);
+      return res.status(500).json({ message: "Failed to verify CAPTCHA. Please try again." });
+    }
+  }
+
   try {
     await strategies[role](req, res);
   } catch (err) {
     console.error(`[auth/login:${role}]`, err);
-    return res.status(500).json({ message: "Failed to send OTP. Please try again." });
+    return res.status(500).json({ message: "Failed to process login. Please try again." });
   }
 });
 
