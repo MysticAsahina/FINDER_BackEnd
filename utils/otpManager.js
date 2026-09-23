@@ -84,7 +84,7 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       const payloadBody = {
         api_token: iProgSmsToken,
         phone_number: mobileNumber,
-        message: `Finder app code: ${code}`,
+        message: `FINDER app code: ${code}`,
         sms_provider: 0
       };
 
@@ -102,6 +102,7 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       }
       
       console.log(`[IProgSMS] Successfully queued OTP to ${mobileNumber}`);
+      console.log(`[IProgSMS] Response: ${responseText}`);
 
     } catch (err) {
       console.error("[IProgSMS] SMS Gateway Error:", err.message || err);
