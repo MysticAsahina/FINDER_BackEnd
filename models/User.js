@@ -74,6 +74,24 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     
+    // --- Passenger-only fields ---
+    isDiscountVerified: {
+      type: Boolean,
+      default: false,
+    },
+    discountType: {
+      type: String,
+      default: null,
+    },
+    discountIdNumber: {
+      type: String,
+      default: null,
+    },
+    discountExpiration: {
+      type: String,
+      default: null,
+    },
+
     pushTokens: {
       type: [String],
       default: [],
@@ -96,6 +114,28 @@ const userSchema = new mongoose.Schema(
         lastName: { type: String, required: true },
         mobileNumber: { type: String, required: true },
       },
+      default: null,
+    },
+    
+    // --- Flagging / Restriction fields ---
+    isFlagged: {
+      type: Boolean,
+      default: false,
+    },
+    flagReason: {
+      type: String,
+      default: null,
+    },
+    flaggedAt: {
+      type: Date,
+      default: null,
+    },
+    warningCount: {
+      type: Number,
+      default: 0,
+    },
+    restrictionEndDate: {
+      type: Date,
       default: null,
     },
   },
@@ -127,6 +167,14 @@ userSchema.pre("save", async function () {
   // Non-drivers cannot carry driverDetails
   if (this.role !== "driver" && this.driverDetails) {
     this.driverDetails = null;
+  }
+
+  // Non-passengers cannot carry discount verification
+  if (this.role !== "passenger") {
+    this.isDiscountVerified = false;
+    this.discountType = null;
+    this.discountIdNumber = null;
+    this.discountExpiration = null;
   }
 });
 

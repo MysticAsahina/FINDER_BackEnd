@@ -60,6 +60,19 @@ const rideSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    passengerCount: {
+      type: Number,
+      default: 1,
+    },
+    discountCount: {
+      type: Number,
+      default: 0,
+    },
+    bookingFor: {
+      type: String,
+      enum: ["myself", "other"],
+      default: "myself",
+    },
     fare: {
       type: Number,
       required: true,

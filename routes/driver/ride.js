@@ -5,6 +5,7 @@ const ActiveDriver = require("../../models/ActiveDriver");
 const { broadcastToRide, sendToUser } = require("../../services/socket");
 const { matchRide } = require("../../services/rideMatcher");
 const { getDistanceInMeters } = require("../../utils/geo");
+const SystemSettings = require("../../models/SystemSettings");
 
 const router = express.Router();
 
@@ -127,7 +128,7 @@ router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res)
 
 // Update ride status (arrive, start, complete)
 router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res) => {
-    const { status, latitude, longitude } = req.body;
+    const { status, latitude, longitude, discountedPassengers } = req.body;
     const validStatuses = ["arrived_pickup", "trip_started", "completed"];
 
     if (!validStatuses.includes(status)) {
@@ -163,6 +164,30 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
                 }
             }
         }
+        if (status === "arrived_pickup" && discountedPassengers !== undefined) {
+            // Re-calculate the fare based on verified driver input
+            let fareSettings = await SystemSettings.findOne({ key: "fare" });
+            if (!fareSettings) {
+                fareSettings = { baseFare: 35, perKmFare: 5, baseDistance: 3 };
+            }
+            
+            const pCount = ride.passengerCount || 1;
+            const dCount = Math.min(pCount, discountedPassengers);
+            const regularCount = pCount - dCount;
+            
+            const extraKm = Math.max(0, Math.ceil((ride.distanceKm || 0) - fareSettings.baseDistance));
+            const effectiveBaseFare = pCount === 1 ? fareSettings.baseFare * 2 : fareSettings.baseFare;
+            
+            const regularFarePerPerson = effectiveBaseFare + (extraKm * fareSettings.perKmFare);
+            const discountedFarePerPerson = (effectiveBaseFare * 0.8) + (extraKm * fareSettings.perKmFare * 0.8);
+            
+            const regularFareTotal = regularCount * regularFarePerPerson;
+            const discountedFareTotal = dCount * discountedFarePerPerson;
+            
+            ride.discountCount = dCount;
+            ride.fare = parseFloat((regularFareTotal + discountedFareTotal).toFixed(2));
+        }
+
         if (status === "trip_started") {
             ride.tripStartedAt = new Date();
         } else if (status === "completed") {
@@ -183,7 +208,8 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
       rideId: ride._id, 
       status, 
       actualDurationMins: ride.actualDurationMins, 
-      actualDistanceKm: ride.actualDistanceKm 
+      actualDistanceKm: ride.actualDistanceKm,
+      fare: ride.fare
     });
 
     if (status === "completed") {

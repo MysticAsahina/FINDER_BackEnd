@@ -405,6 +405,11 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       emergencyContact: user.emergencyContact || null,
     };
 
+    if (user.role === "passenger") {
+        userPayload.isDiscountVerified = user.isDiscountVerified;
+        userPayload.discountType = user.discountType;
+    }
+
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 
     return res.status(200).json({ accessToken, refreshToken, user: userPayload });
@@ -516,6 +521,11 @@ router.post("/refresh", async (req, res) => {
         email: user.email || null,
         emergencyContact: user.emergencyContact || null,
     };
+
+    if (user.role === "passenger") {
+        userPayload.isDiscountVerified = user.isDiscountVerified;
+        userPayload.discountType = user.discountType;
+    }
 
     if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
 

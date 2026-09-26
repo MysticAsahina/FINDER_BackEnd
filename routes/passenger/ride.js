@@ -80,7 +80,7 @@ const isWithinCabanatuan = (lat, lng) => {
 // Request a new ride
 router.post("/request", authenticate, requireRole("passenger"), rideRequestLimiter, async (req, res) => {
   try {
-    const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins } = req.body;
+    const { pickup, dropoff, paymentMethod, fare, distanceKm, durationMins, passengerCount, discountCount, bookingFor } = req.body;
 
     if (!pickup || !pickup.latitude || !pickup.longitude || !dropoff || !dropoff.latitude || !dropoff.longitude) {
       return res.status(400).json({ message: "Pickup and dropoff locations are required." });
@@ -112,13 +112,31 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
     // Fetch fare settings
     let fareSettings = await SystemSettings.findOne({ key: "fare" });
     if (!fareSettings) {
-      fareSettings = { baseFare: 25, perKmFare: 8.5, baseDistance: 2 };
+      fareSettings = { baseFare: 35, perKmFare: 5, baseDistance: 3 };
     }
 
     // Calculate fare server-side
+    let calculatedFare = 0;
+    const pCount = Math.min(3, passengerCount || 1); // Max 3 passengers
+    const dCount = Math.min(pCount, discountCount || 0); // Can't have more discounts than passengers
+    const bFor = bookingFor || "myself";
+    const regularCount = pCount - dCount;
+
     const dist = distanceKm || 0;
-    const extraKm = Math.max(0, dist - fareSettings.baseDistance);
-    const calculatedFare = parseFloat((fareSettings.baseFare + extraKm * fareSettings.perKmFare).toFixed(2));
+    const extraKm = Math.max(0, Math.ceil(dist - fareSettings.baseDistance)); // Rounded UP fraction of a km
+
+    // Apply special ride rule for 1 passenger
+    const effectiveBaseFare = pCount === 1 ? fareSettings.baseFare * 2 : fareSettings.baseFare;
+
+    // Regular Fare Calculation
+    const regularFareTotal = regularCount * (effectiveBaseFare + (extraKm * fareSettings.perKmFare));
+
+    // Discounted Fare Calculation (20% off)
+    const discountedBase = effectiveBaseFare * 0.8;
+    const discountedPerKm = fareSettings.perKmFare * 0.8;
+    const discountedFareTotal = dCount * (discountedBase + (extraKm * discountedPerKm));
+
+    calculatedFare = parseFloat((regularFareTotal + discountedFareTotal).toFixed(2));
 
     const ride = new Ride({
       passengerId: req.user.id,
@@ -141,6 +159,9 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
       fare: calculatedFare,
       distanceKm: distanceKm || 0,
       durationMins: durationMins || 0,
+      passengerCount: pCount,
+      discountCount: dCount,
+      bookingFor: bFor,
     });
 
     let checkout_url = null;
