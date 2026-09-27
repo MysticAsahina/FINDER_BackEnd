@@ -47,9 +47,17 @@ async function sendSms(mobileNumber, message) {
         signal: AbortSignal.timeout(5000)
       });
       
+      const responseText = await response.text();
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to send SMS via IProgSMS. Status: ${response.status} - ${errorText}`);
+        throw new Error(`Failed to send SMS via IProgSMS. HTTP Status: ${response.status} - ${responseText}`);
+      }
+      try {
+        const jsonResponse = JSON.parse(responseText);
+        if (jsonResponse.status && jsonResponse.status >= 400) {
+          throw new Error(`IProgSMS API Error: ${JSON.stringify(jsonResponse.message || jsonResponse)}`);
+        }
+      } catch (parseErr) {
+        if (parseErr.message.includes('IProgSMS API Error')) throw parseErr;
       }
     } catch (err) {
       console.error("[IProgSMS] SMS Gateway Error:", err);
@@ -84,8 +92,8 @@ async function sendSmsOtp(key, mobileNumber, payload = {}) {
       const payloadBody = {
         api_token: iProgSmsToken,
         phone_number: mobileNumber,
-        message: `FINDER app code: ${code}`,
-        sms_provider: 0
+        message: `Your code expires in 5 minutes: ${code}`,
+        sms_provider: 1
       };
 
       const response = await fetch(endpoint, {
