@@ -104,6 +104,10 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
       return res.status(400).json({ message: "You already have an active ride." });
     }
 
+    if (!paymentMethod) {
+      return res.status(400).json({ message: "Payment method is required." });
+    }
+
     if (paymentMethod !== "cash" && paymentMethod !== "paymongo") {
       console.log("Unsupported payment method:", paymentMethod);
       return res.status(400).json({ message: "Unsupported payment method." });
