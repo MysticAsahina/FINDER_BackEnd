@@ -7,6 +7,7 @@ const cron = require("node-cron");
 const DriverApplication = require("../models/DriverApplication");
 const User = require("../models/User");
 const { broadcastToAdmins } = require("../services/socket");
+const { sendSmsOtp, verifyOtp } = require("../utils/otpManager");
 const { validatePasswordLength, validateName, validateMobileFormat, validateMpinFormat, validateUrl, validateLicenseNumber, validatePlateNumber, validateMotorcycleBrand, validateLicenseExpDate } = require('../utils/validators');
 
 // Configure Cloudinary from env
