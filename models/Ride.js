@@ -125,6 +125,18 @@ const rideSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    cancellationData: {
+      cancelledBy: { type: String, enum: ['passenger', 'driver', 'system'], default: null },
+      reason: { type: String, default: null },
+      driverAcceptedLocation: {
+        type: { type: String, enum: ['Point'] },
+        coordinates: { type: [Number] }
+      },
+      lastPassengerCommunicationAt: { type: Date, default: null },
+      lastDriverCommunicationAt: { type: Date, default: null },
+      driverAssignedAt: { type: Date, default: null },
+      arrivedPickupAt: { type: Date, default: null }
+    },
   },
   { timestamps: true }
 );

@@ -75,6 +75,10 @@ router.post("/:rideId/chat", authenticate, requireRole("passenger"), messageLimi
     }
 
     ride.chatMessages.push(newMessage);
+    if (!ride.cancellationData) {
+      ride.cancellationData = {};
+    }
+    ride.cancellationData.lastPassengerCommunicationAt = new Date();
     await ride.save();
 
     // Broadcast the message via socket

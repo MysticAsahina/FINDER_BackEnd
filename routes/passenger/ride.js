@@ -217,9 +217,12 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
   }
 });
 
+const { validateCancellation, recordStrikeAndEvaluate } = require("../../services/strikes");
+
 // Cancel a ride
 router.post("/:id/cancel", authenticate, requireRole("passenger"), async (req, res) => {
   try {
+    const { reason, forceStandardCancel } = req.body;
     const ride = await Ride.findOne({ _id: req.params.id, passengerId: req.user.id });
     
     if (!ride) {
@@ -230,10 +233,27 @@ router.post("/:id/cancel", authenticate, requireRole("passenger"), async (req, r
       return res.status(400).json({ message: "Ride is already completed or cancelled." });
     }
 
+    // Strike evaluation
+    const validation = await validateCancellation(ride, "passenger", reason, forceStandardCancel);
+    if (!validation.valid) {
+      if (validation.errorCode) {
+        return res.status(400).json({ code: validation.errorCode, message: validation.error });
+      }
+      return res.status(400).json({ message: validation.error });
+    }
+
+    if (!ride.cancellationData) ride.cancellationData = {};
+    ride.cancellationData.cancelledBy = "passenger";
+    ride.cancellationData.reason = reason || null;
+    
     ride.status = "cancelled";
     await ride.save();
 
-    broadcastToRide(ride._id, "ride_cancelled", { reason: "Cancelled by passenger" });
+    if (validation.strikeType && validation.targetUserId) {
+      await recordStrikeAndEvaluate(validation.targetUserId, validation.strikeType, ride._id);
+    }
+
+    broadcastToRide(ride._id, "ride_cancelled", { reason: reason || "Cancelled by passenger" });
 
     // If driver was assigned, free them up
     if (ride.driverId) {

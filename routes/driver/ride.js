@@ -54,6 +54,14 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
     // Assign driver and update status
     ride.driverId = req.user.id;
     ride.status = "driver_assigned";
+    
+    const driverState = await ActiveDriver.findOne({ driverId: req.user.id });
+    if (!ride.cancellationData) ride.cancellationData = {};
+    ride.cancellationData.driverAssignedAt = new Date();
+    if (driverState && driverState.location) {
+      ride.cancellationData.driverAcceptedLocation = driverState.location;
+    }
+    
     await ride.save();
 
     // Set driver as busy
@@ -94,9 +102,12 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
   }
 });
 
+const { validateCancellation, recordStrikeAndEvaluate } = require("../../services/strikes");
+
 // Cancel a ride (by driver)
 router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    const { reason, forceStandardCancel } = req.body;
     const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
     
     if (!ride) {
@@ -111,10 +122,27 @@ router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res)
       return res.status(400).json({ message: "Cannot cancel a ride that has already started." });
     }
 
+    // Strike evaluation
+    const validation = await validateCancellation(ride, "driver", reason, forceStandardCancel);
+    if (!validation.valid) {
+      if (validation.errorCode) {
+        return res.status(400).json({ code: validation.errorCode, message: validation.error });
+      }
+      return res.status(400).json({ message: validation.error });
+    }
+
+    if (!ride.cancellationData) ride.cancellationData = {};
+    ride.cancellationData.cancelledBy = "driver";
+    ride.cancellationData.reason = reason || null;
+
     ride.status = "cancelled";
     await ride.save();
 
-    broadcastToRide(ride._id, "ride_cancelled", { reason: "The driver has cancelled the ride." });
+    if (validation.strikeType && validation.targetUserId) {
+      await recordStrikeAndEvaluate(validation.targetUserId, validation.strikeType, ride._id);
+    }
+
+    broadcastToRide(ride._id, "ride_cancelled", { reason: reason || "The driver has cancelled the ride." });
 
     // Free up driver
     await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });

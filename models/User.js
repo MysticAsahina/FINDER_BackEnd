@@ -138,6 +138,11 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    strikes: [{
+      type: { type: String, enum: ['frequent_cancellation', 'unresponsive_passenger', 'unresponsive_driver'] },
+      rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' },
+      createdAt: { type: Date, default: Date.now }
+    }],
   },
   { timestamps: true }
 );

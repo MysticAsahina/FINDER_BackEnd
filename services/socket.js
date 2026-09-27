@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const ActiveDriver = require("../models/ActiveDriver");
+const Ride = require("../models/Ride");
 
 let io;
 
@@ -74,7 +75,18 @@ function init(server) {
     });
 
     // ── WebRTC Signaling ───────────────────────────────────────────────────
-    socket.on("webrtc_call_initiated", ({ rideId, callerName, isVideo }) => {
+    socket.on("webrtc_call_initiated", async ({ rideId, callerName, isVideo }) => {
+      // Record communication for strike system
+      try {
+        const role = socket.user.role;
+        const updateField = role === 'passenger' 
+          ? { 'cancellationData.lastPassengerCommunicationAt': new Date() }
+          : { 'cancellationData.lastDriverCommunicationAt': new Date() };
+        await Ride.updateOne({ _id: rideId }, { $set: updateField });
+      } catch (err) {
+        console.error("Failed to update call timestamp", err);
+      }
+
       // Broadcast to the other party in the ride room
       socket.to(rideId.toString()).emit("webrtc_call_initiated", { callerName, isVideo, rideId });
     });
