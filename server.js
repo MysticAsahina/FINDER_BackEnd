@@ -51,6 +51,7 @@ app.use(cors({
 }));
 
 app.use(express.json({
+  limit: '50mb',
   verify: (req, res, buf) => {
     req.rawBody = buf; // This saves the raw text so we can verify the PayMongo signature
   }
