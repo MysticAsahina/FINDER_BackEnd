@@ -11,7 +11,7 @@ const { broadcastToRide, joinUserToRoom, sendToUser } = require("../../services/
 const router = express.Router();
 
 const rideRequestLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 1 * 60 * 1000, // 15 minutes
   max: 5, // Limit each IP or User to 5 ride requests per 15 minutes
   message: { 
     message: "You are requesting too many rides. Please try again in 15 minutes." 
