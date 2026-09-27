@@ -120,10 +120,22 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
     }
 
     // Calculate fare server-side
+    const bFor = bookingFor === "other" ? "other" : "myself";
     let calculatedFare = 0;
-    const pCount = Math.min(3, passengerCount || 1); // Max 3 passengers
-    const dCount = Math.min(pCount, discountCount || 0); // Can't have more discounts than passengers
-    const bFor = bookingFor || "myself";
+    
+    let pCount = 1;
+    let dCount = 0;
+
+    if (bFor === "myself") {
+      pCount = 1;
+      const User = require("../../models/User");
+      const passengerUser = await User.findById(req.user.id);
+      dCount = passengerUser && passengerUser.isDiscountVerified ? 1 : 0;
+    } else {
+      pCount = Math.max(1, Math.min(3, passengerCount || 1)); // Max 3 passengers
+      dCount = Math.max(0, Math.min(pCount, discountCount || 0)); // Can't have more discounts than passengers
+    }
+
     const regularCount = pCount - dCount;
 
     const dist = distanceKm || 0;
