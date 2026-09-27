@@ -19,6 +19,7 @@ router.get("/fare", async (req, res) => {
       baseFare: settings.baseFare,
       perKmFare: settings.perKmFare,
       baseDistance: settings.baseDistance,
+      ordinanceUrl: settings.ordinanceUrl,
     });
   } catch (err) {
     console.error("[passenger/settings/fare GET]", err);
