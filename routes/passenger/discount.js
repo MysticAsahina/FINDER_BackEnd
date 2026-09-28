@@ -29,6 +29,26 @@ router.post("/apply", authenticate, requireRole("passenger"), applyLimiter, asyn
       return res.status(400).json({ message: "All fields including ID image are required." });
     }
 
+    if (fullName.trim().length < 2) {
+      return res.status(400).json({ message: "Full name must be at least 2 characters." });
+    }
+
+    if (!/^09\d{9}$/.test(mobileNumber.trim())) {
+      return res.status(400).json({ message: "Invalid mobile number format." });
+    }
+
+    if (!/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/(19|20)\d{2}$/.test(dob.trim())) {
+      return res.status(400).json({ message: "Invalid Date of Birth format (MM/DD/YYYY)." });
+    }
+
+    if (idNumber.trim().length < 4 || idNumber.trim().length > 30) {
+      return res.status(400).json({ message: "ID number must be between 4 and 30 characters." });
+    }
+
+    if (expirationDate && expirationDate.trim() && !/^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/(20)\d{2}$/.test(expirationDate.trim())) {
+      return res.status(400).json({ message: "Invalid Expiration Date format (MM/DD/YYYY)." });
+    }
+
     // Check if there is already a pending application for this user
     const existingPending = await DiscountApplication.findOne({
       passengerId: req.user.id,
