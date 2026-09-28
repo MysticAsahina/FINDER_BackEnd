@@ -116,7 +116,7 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
     // Fetch fare settings
     let fareSettings = await SystemSettings.findOne({ key: "fare" });
     if (!fareSettings) {
-      fareSettings = { baseFare: 35, perKmFare: 5, baseDistance: 3 };
+      fareSettings = { baseFare: 25, perKmFare: 8.5, baseDistance: 3 };
     }
 
     // Calculate fare server-side

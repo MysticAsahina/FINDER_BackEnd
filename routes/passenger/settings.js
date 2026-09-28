@@ -12,7 +12,7 @@ router.get("/fare", async (req, res) => {
         key: "fare",
         baseFare: 25,
         perKmFare: 8.5,
-        baseDistance: 2,
+        baseDistance: 3,
       });
     }
     return res.status(200).json({

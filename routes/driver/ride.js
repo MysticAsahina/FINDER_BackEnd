@@ -196,7 +196,7 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             // Re-calculate the fare based on verified driver input
             let fareSettings = await SystemSettings.findOne({ key: "fare" });
             if (!fareSettings) {
-                fareSettings = { baseFare: 35, perKmFare: 5, baseDistance: 3 };
+                fareSettings = { baseFare: 25, perKmFare: 8.5, baseDistance: 3 };
             }
             
             const pCount = ride.passengerCount || 1;
