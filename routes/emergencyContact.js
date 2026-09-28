@@ -126,7 +126,7 @@ router.post("/trigger", authenticate, requireRole("passenger"), emergencyTrigger
     }
 
     if (latitude && longitude) {
-      message += ` Location: https://maps.google.com/?q=${latitude},${longitude}`;
+      message += ` Location Coordinates (Paste in Google Maps): ${latitude}, ${longitude}`;
     }
 
     const { sendSms } = require("../utils/otpManager");
