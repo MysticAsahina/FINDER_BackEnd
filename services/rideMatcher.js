@@ -51,7 +51,11 @@ async function matchRide(rideId) {
       return;
     }
 
-    // Send request to driver
+    // Update DB with current candidate so it can be fetched via API
+    ride.currentCandidateDriverId = nearestDriver.driverId;
+    await ride.save();
+
+    // Send request to driver via socket
     sendToUser(nearestDriver.driverId, "ride_request", {
       rideId: ride._id,
       pickup: ride.pickup,
@@ -60,13 +64,21 @@ async function matchRide(rideId) {
       distanceKm: ride.distanceKm,
     });
 
+    // Send push notification to driver
+    const { sendPushToUser } = require("./notification");
+    sendPushToUser(nearestDriver.driverId, "New Ride Request", "You have a new ride request! Open the app to view and accept.", {
+      type: "ride_request",
+      rideId: ride._id.toString()
+    });
+
     // Set timeout to wait for response
     setTimeout(async () => {
       try {
         const currentRide = await Ride.findById(rideId);
         // If still pending, the driver ignored it
-        if (currentRide && currentRide.status === "pending") {
+        if (currentRide && currentRide.status === "pending" && currentRide.currentCandidateDriverId?.toString() === nearestDriver.driverId.toString()) {
           currentRide.ignoredDrivers.push(nearestDriver.driverId);
+          currentRide.currentCandidateDriverId = null;
           await currentRide.save();
           // Notify driver that request expired
           sendToUser(nearestDriver.driverId, "ride_request_expired", { rideId: currentRide._id });

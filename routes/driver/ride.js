@@ -13,8 +13,10 @@ const router = express.Router();
 router.get("/current", authenticate, requireRole("driver"), async (req, res) => {
   try {
     const ride = await Ride.findOne({
-      driverId: req.user.id,
-      status: { $nin: ["completed", "cancelled"] },
+      $or: [
+        { driverId: req.user.id, status: { $nin: ["completed", "cancelled"] } },
+        { currentCandidateDriverId: req.user.id, status: "pending" }
+      ]
     }).populate("passengerId", "firstName lastName mobileNumber");
     
     res.json({ ride });
@@ -90,6 +92,9 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
       return res.status(400).json({ message: "Ride is no longer pending." });
     }
 
+    if (ride.currentCandidateDriverId?.toString() === req.user.id.toString()) {
+      ride.currentCandidateDriverId = null;
+    }
     ride.ignoredDrivers.push(req.user.id);
     await ride.save();
 
