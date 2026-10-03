@@ -8,7 +8,7 @@ const DriverApplication = require("../models/DriverApplication");
 const User = require("../models/User");
 const { broadcastToAdmins } = require("../services/socket");
 const { sendSmsOtp, verifyOtp } = require("../utils/otpManager");
-const { validatePasswordLength, validateName, validateMobileFormat, validateMpinFormat, validateUrl, validateLicenseNumber, validatePlateNumber, validateMotorcycleBrand, validateLicenseExpDate } = require('../utils/validators');
+const { validatePasswordPolicy, validatePasswordLength, validateName, validateMobileFormat, validateMpinFormat, validateUrl, validateLicenseNumber, validatePlateNumber, validateMotorcycleBrand, validateLicenseExpDate } = require('../utils/validators');
 
 // Configure Cloudinary from env
 cloudinary.config({
@@ -439,7 +439,7 @@ router.post("/submit", submitLimiter, async (req, res) => {
     const brandError = validateMotorcycleBrand(motorcycleBrand);
     if (brandError) return res.status(400).json({ message: brandError });
 
-    const passwordError = validatePasswordLength(password.trim());
+    const passwordError = validatePasswordPolicy(password.trim());
     if (passwordError) return res.status(400).json({ message: passwordError });
 
     if (password.trim() !== confirmPassword.trim()) {
