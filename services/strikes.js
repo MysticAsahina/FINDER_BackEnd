@@ -80,6 +80,10 @@ async function validateCancellation(ride, cancelledByRole, reason, forceStandard
       return { valid: true, strikeType: "unresponsive_driver", targetUserId: ride.driverId };
     }
 
+    if (reason === "Driver is taking other passengers outside the app") {
+      return { valid: true, strikeType: "policy_violation", targetUserId: ride.driverId };
+    }
+
     // Standard passenger cancellation
     // If they cancel after matched, it's a strike against them
     if (ride.status === "driver_assigned" || ride.status === "arrived_pickup") {
@@ -177,6 +181,18 @@ async function recordStrikeAndEvaluate(userId, strikeType, rideId) {
       user.flaggedAt = now;
       await user.save();
       sendToUser(user._id, "account_warning", { message: "Your account has been flagged for unresponsiveness." });
+      return;
+    }
+  }
+
+  if (strikeType === "policy_violation") {
+    const violations = user.strikes.filter(s => s.type === "policy_violation");
+    if (violations.length >= 3 && !user.isFlagged) {
+      user.isFlagged = true;
+      user.flagReason = "Policy Violation (Outside Hailing)";
+      user.flaggedAt = now;
+      await user.save();
+      sendToUser(user._id, "account_warning", { message: "Your account has been flagged for multiple policy violations." });
       return;
     }
   }
