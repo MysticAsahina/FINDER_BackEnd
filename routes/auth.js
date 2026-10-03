@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const ActiveDriver = require("../models/ActiveDriver");
+const Ride = require("../models/Ride");
 const { logAdminAction } = require("../utils/auditLogger");
 const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
 const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
@@ -602,6 +604,9 @@ router.post("/logout", async (req, res) => {
     if (user && user.role === "admin") {
       logAdminAction(req, user._id, user.firstName + " " + user.lastName, "LOGOUT", "Admin logged out");
     }
+    if (user && user.role === "driver") {
+      await ActiveDriver.findOneAndUpdate({ driverId: user._id }, { isOnline: false });
+    }
     await User.findByIdAndUpdate(decoded.id, { refreshToken: null, pushTokens: [] });
     return res.status(200).json({ message: "Logged out." });
   } catch {
@@ -856,6 +861,20 @@ router.delete("/delete-account", authenticate, requireRole("passenger", "driver"
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Incorrect password." });
+
+    // Ensure they have no active rides
+    const activeRide = await Ride.findOne({
+      $or: [{ passengerId: req.user.id }, { driverId: req.user.id }],
+      status: { $in: ['pending', 'driver_assigned', 'arrived_pickup', 'trip_started'] }
+    });
+    
+    if (activeRide) {
+      return res.status(400).json({ message: "You cannot delete your account while involved in an active ride. Please complete or cancel the ride first." });
+    }
+
+    if (user.role === "driver") {
+      await ActiveDriver.findOneAndDelete({ driverId: user._id });
+    }
 
     // Perform a hard delete as requested
     await User.findByIdAndDelete(req.user.id);

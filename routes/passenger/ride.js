@@ -132,6 +132,9 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
       const passengerUser = await User.findById(req.user.id);
       dCount = passengerUser && passengerUser.isDiscountVerified ? 1 : 0;
     } else {
+      if (passengerCount && passengerCount > 3) {
+        return res.status(400).json({ message: "A maximum of 3 passengers is allowed per booking." });
+      }
       pCount = Math.max(1, Math.min(3, passengerCount || 1)); // Max 3 passengers
       dCount = Math.max(0, Math.min(pCount, discountCount || 0)); // Can't have more discounts than passengers
     }

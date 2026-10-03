@@ -41,5 +41,6 @@ const activeDriverSchema = new mongoose.Schema(
 
 // 2dsphere index for spatial queries
 activeDriverSchema.index({ location: "2dsphere" });
+activeDriverSchema.index({ isOnline: 1, lastUpdated: 1 });
 
 module.exports = mongoose.model("ActiveDriver", activeDriverSchema);

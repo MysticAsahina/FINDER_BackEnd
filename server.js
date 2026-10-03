@@ -37,6 +37,7 @@ const paymentRouter                 = require('./routes/passenger/payment');
 
 const http = require("http");
 const socketService = require("./services/socket");
+const { startIdleMonitor } = require("./services/idleMonitor");
 
 require('dns').setDefaultResultOrder('ipv4first');
 
@@ -139,6 +140,7 @@ mongoose.connect(process.env.MONGO_URI, {
     }, 3 * 60 * 1000);
 
     socketService.init(server);
+    startIdleMonitor();
     server.listen(port, () => {
       console.log(`Listening on port ${port}`);
     });

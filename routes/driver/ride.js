@@ -172,9 +172,6 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
         }
 
         if (status === "arrived_pickup" || status === "completed") {
-            if (latitude === undefined || longitude === undefined) {
-                return res.status(400).json({ message: "Latitude and longitude are required for this status update." });
-            }
             let targetCoords;
             if (status === "arrived_pickup") {
                 targetCoords = ride.pickup.coordinates.coordinates; // [lng, lat]
@@ -182,14 +179,24 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
                 targetCoords = ride.dropoff.coordinates.coordinates;
             }
 
-            if (targetCoords && targetCoords.length === 2) {
+            // If coordinates are missing (e.g. driver lost GPS fix) or distance > 100m,
+            // we default to requiring passenger override rather than hard-blocking the ride.
+            let requiresOverride = false;
+            
+            if (latitude === undefined || longitude === undefined) {
+                requiresOverride = true;
+            } else if (targetCoords && targetCoords.length === 2) {
                 const distance = getDistanceInMeters(latitude, longitude, targetCoords[1], targetCoords[0]);
                 if (distance > 100) {
-                    // Broadcast to room just in case, but also send directly to passenger's socket to prevent sync issues
-                    broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
-                    sendToUser(ride.passengerId, "override_request", { rideId: ride._id, status });
-                    return res.status(400).json({ code: "GPS_TOO_FAR", message: "You are too far from the location. Waiting for passenger override." });
+                    requiresOverride = true;
                 }
+            }
+
+            if (requiresOverride) {
+                // Broadcast to room just in case, but also send directly to passenger's socket to prevent sync issues
+                broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
+                sendToUser(ride.passengerId, "override_request", { rideId: ride._id, status });
+                return res.status(400).json({ code: "GPS_TOO_FAR", message: "Location could not be verified or is too far. Waiting for passenger override." });
             }
         }
         if (status === "arrived_pickup" && discountedPassengers !== undefined) {
