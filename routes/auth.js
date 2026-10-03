@@ -718,6 +718,67 @@ router.post("/forgot-password/verify-otp", otpSubmitLimiter, async (req, res) =>
 });
 
 // ---------------------------------------------------------------------------
+// POST /auth/forgot-mpin
+// ---------------------------------------------------------------------------
+router.post("/forgot-mpin", async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
+    if (decoded.role !== "driver") return res.status(403).json({ message: "Drivers only." });
+
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    await sendOtp(user._id, user.mobileNumber);
+    return res.status(200).json({ message: "OTP sent to your registered mobile number." });
+  } catch (err) {
+    console.error("[auth/forgot-mpin]", err);
+    return res.status(500).json({ message: "Failed to process request." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/forgot-mpin/verify-otp
+// ---------------------------------------------------------------------------
+router.post("/forgot-mpin/verify-otp", otpSubmitLimiter, async (req, res) => {
+  const { code } = req.body;
+  const authHeader = req.headers.authorization;
+
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], process.env.ACCESS_SECRET);
+    if (decoded.role !== "driver") return res.status(403).json({ message: "Drivers only." });
+
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const otpResult = verifyOtp(user._id, code);
+    if (!otpResult.valid) {
+      return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+    }
+
+    user.driverDetails.mpin = null;
+    await user.save();
+
+    return res.status(200).json({ message: "MPIN has been reset successfully." });
+  } catch (err) {
+    console.error("[auth/forgot-mpin/verify-otp]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /auth/forgot-password/reset
 // ---------------------------------------------------------------------------
 router.post("/forgot-password/reset", forgotPasswordLimiter, async (req, res) => {
