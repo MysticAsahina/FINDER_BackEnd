@@ -120,9 +120,9 @@ function init(server) {
     });
 
     // Driver sends their location during an active trip
-    socket.on("driver_location_update", ({ rideId, location }) => {
+    socket.on("driver_location_update", ({ rideId, location, duration }) => {
       // Broadcast this location update to anyone else in the ride room (the passenger)
-      broadcastToRide(rideId, "driver_location_update", location);
+      broadcastToRide(rideId, "driver_location_update", { location, duration });
     });
 
     // Clean up when the socket disconnects (e.g. user closes the app)

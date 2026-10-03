@@ -135,7 +135,8 @@ const rideSchema = new mongoose.Schema(
       lastPassengerCommunicationAt: { type: Date, default: null },
       lastDriverCommunicationAt: { type: Date, default: null },
       driverAssignedAt: { type: Date, default: null },
-      arrivedPickupAt: { type: Date, default: null }
+      arrivedPickupAt: { type: Date, default: null },
+      driverEtaToPickupMins: { type: Number, default: null }
     },
   },
   { timestamps: true }

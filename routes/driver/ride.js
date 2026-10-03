@@ -154,6 +154,27 @@ router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res)
   }
 });
 
+// Save initial ETA to pickup
+router.patch("/:id/eta", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const { duration } = req.body;
+    if (duration == null) return res.status(400).json({ message: "Duration is required" });
+
+    const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
+    if (!ride) return res.status(404).json({ message: "Ride not found." });
+
+    if (!ride.cancellationData) ride.cancellationData = {};
+    if (ride.cancellationData.driverEtaToPickupMins == null) {
+      ride.cancellationData.driverEtaToPickupMins = duration;
+      await ride.save();
+    }
+    res.json({ message: "ETA saved" });
+  } catch (err) {
+    console.error("[driver-ride-eta]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Update ride status (arrive, start, complete)
 router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res) => {
     const { status, latitude, longitude, discountedPassengers } = req.body;
@@ -221,6 +242,21 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             
             ride.discountCount = dCount;
             ride.fare = parseFloat((regularFareTotal + discountedFareTotal).toFixed(2));
+        }
+
+        if (status === "arrived_pickup") {
+            if (!ride.cancellationData) ride.cancellationData = {};
+            ride.cancellationData.arrivedPickupAt = new Date();
+
+            // Evaluate late arrival flag
+            if (ride.cancellationData.driverAssignedAt && ride.cancellationData.driverEtaToPickupMins) {
+                const elapsedMins = (ride.cancellationData.arrivedPickupAt.getTime() - ride.cancellationData.driverAssignedAt.getTime()) / 60000;
+                // If they took more than ETA + 20 mins (grace period), they arrived unreasonably late
+                if (elapsedMins > ride.cancellationData.driverEtaToPickupMins + 20) {
+                    const { recordStrikeAndEvaluate } = require("../../services/strikes");
+                    await recordStrikeAndEvaluate(ride.driverId, "late_arrival", ride._id);
+                }
+            }
         }
 
         if (status === "trip_started") {

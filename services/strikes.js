@@ -197,6 +197,18 @@ async function recordStrikeAndEvaluate(userId, strikeType, rideId) {
     }
   }
 
+  if (strikeType === "late_arrival") {
+    const lates = user.strikes.filter(s => s.type === "late_arrival");
+    if (lates.length >= 3 && !user.isFlagged) {
+      user.isFlagged = true;
+      user.flagReason = "Late Arrival";
+      user.flaggedAt = now;
+      await user.save();
+      sendToUser(user._id, "account_warning", { message: "Your account has been flagged for consistent late arrivals." });
+      return;
+    }
+  }
+
   await user.save();
 }
 
