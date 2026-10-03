@@ -6,6 +6,7 @@ const User = require("../models/User");
 const { logAdminAction } = require("../utils/auditLogger");
 const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
 const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
+const { authenticate, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -56,6 +57,15 @@ const mpinLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many MPIN attempts. Please wait before trying again." },
+});
+
+// Delete Account: max 3 attempts per 15 minutes per IP
+const deleteAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many delete account requests. Please try again later." },
 });
 
 // ---------------------------------------------------------------------------
@@ -823,6 +833,37 @@ router.post("/forgot-password/reset", forgotPasswordLimiter, async (req, res) =>
     }
     console.error("[auth/forgot-password/reset]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /auth/delete-account
+// ---------------------------------------------------------------------------
+router.delete("/delete-account", authenticate, requireRole("passenger", "driver"), deleteAccountLimiter, async (req, res) => {
+  const { confirmationText, password } = req.body;
+
+  if (confirmationText !== "DELETE") {
+    return res.status(400).json({ message: "You must type 'DELETE' to confirm account deletion." });
+  }
+  
+  if (!password) {
+    return res.status(400).json({ message: "Password is required to delete your account." });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) return res.status(401).json({ message: "Incorrect password." });
+
+    // Perform a hard delete as requested
+    await User.findByIdAndDelete(req.user.id);
+
+    return res.status(200).json({ message: "Your account has been successfully deleted." });
+  } catch (err) {
+    console.error("[auth/delete-account]", err);
+    return res.status(500).json({ message: "Server error while deleting account." });
   }
 });
 
