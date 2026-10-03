@@ -31,37 +31,52 @@ async function validateCancellation(ride, cancelledByRole, reason, forceStandard
 
       const assignedTime = new Date(ride.cancellationData.driverAssignedAt).getTime();
       const now = Date.now();
+      const elapsedMins = (now - assignedTime) / 60000;
       
-      if (now - assignedTime < 10 * 60 * 1000) {
+      // Scenario: Too early
+      if (elapsedMins < 10) {
         return { valid: false, error: "10 minutes have not elapsed since driver assignment." };
       }
 
-      // Check communication
-      const lastComm = ride.cancellationData.lastDriverCommunicationAt 
-        ? new Date(ride.cancellationData.lastDriverCommunicationAt).getTime() 
-        : 0;
-      
-      if (now - lastComm < 10 * 60 * 1000) {
-        return { valid: false, errorCode: "DRIVER_IS_ACTIVE", error: "The driver has recently communicated." };
-      }
-
-      // Check location movement
+      // Determine if driver moved >150m
+      let movedDistanceGreaterThan150 = false;
       const driverState = await ActiveDriver.findOne({ driverId: ride.driverId });
       const acceptedLoc = ride.cancellationData.driverAcceptedLocation;
       
       if (driverState && driverState.location && acceptedLoc && acceptedLoc.coordinates) {
-        // coordinates are [lon, lat]
         const currentLon = driverState.location.coordinates[0];
         const currentLat = driverState.location.coordinates[1];
         const acceptedLon = acceptedLoc.coordinates[0];
         const acceptedLat = acceptedLoc.coordinates[1];
-
         const dist = getDistanceInMeters(currentLat, currentLon, acceptedLat, acceptedLon);
         if (dist > 150) {
-          return { valid: false, errorCode: "DRIVER_IS_ACTIVE", error: "The driver is actively moving." };
+          movedDistanceGreaterThan150 = true;
         }
       }
 
+      // Scenario: Stuck/delayed (moved >150m) -> Cancel + NO strike
+      if (movedDistanceGreaterThan150) {
+        return { valid: true, strikeType: null };
+      }
+
+      // If driver didn't move >150m, check communication
+      const lastComm = ride.cancellationData.lastDriverCommunicationAt 
+        ? new Date(ride.cancellationData.lastDriverCommunicationAt).getTime() 
+        : 0;
+      const communicatedInLast10Min = (now - lastComm) < 10 * 60 * 1000;
+
+      // Scenario: Lazy, stalling (20+ min without moving) -> Cancel + driver strike (ignore chat)
+      if (elapsedMins >= 20) {
+        return { valid: true, strikeType: "unresponsive_driver", targetUserId: ride.driverId };
+      }
+
+      // Between 10 and 20 mins:
+      // Scenario: Lazy, chatty -> Reject (benefit of doubt)
+      if (communicatedInLast10Min) {
+        return { valid: false, errorCode: "DRIVER_IS_ACTIVE", error: "The driver has recently communicated." };
+      }
+
+      // Scenario: Lazy, silent -> Cancel + driver strike
       return { valid: true, strikeType: "unresponsive_driver", targetUserId: ride.driverId };
     }
 

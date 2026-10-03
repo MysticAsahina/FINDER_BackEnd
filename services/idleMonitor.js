@@ -39,10 +39,48 @@ async function checkIdleDrivers() {
   }
 }
 
+const RIDE_STUCK_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+async function checkStuckRides() {
+  try {
+    const thresholdDate = new Date(Date.now() - RIDE_STUCK_TIMEOUT_MS);
+    
+    // Find rides that have been stuck in an active state with no updates for 3 hours
+    const stuckRides = await Ride.find({
+      status: { $in: ['driver_assigned', 'arrived_pickup', 'trip_started'] },
+      updatedAt: { $lt: thresholdDate }
+    });
+
+    for (const ride of stuckRides) {
+      if (!ride.cancellationData) ride.cancellationData = {};
+      ride.cancellationData.cancelledBy = "system";
+      ride.cancellationData.reason = "Ride was automatically cancelled due to prolonged inactivity (abandoned ride).";
+      ride.status = "cancelled";
+      await ride.save();
+
+      // Free up driver
+      if (ride.driverId) {
+        await ActiveDriver.findOneAndUpdate({ driverId: ride.driverId }, { isBusy: false });
+        sendToUser(ride.driverId, "ride_cancelled", { reason: "Ride was automatically cancelled due to prolonged inactivity (abandoned ride)." });
+      }
+
+      // Notify passenger
+      sendToUser(ride.passengerId, "ride_cancelled", { reason: "Ride was automatically cancelled due to prolonged inactivity (abandoned ride)." });
+      
+      console.log(`[idleMonitor] Ride ${ride._id} automatically cancelled (stuck for > 3 hours).`);
+    }
+  } catch (error) {
+    console.error("[idleMonitor] Error checking stuck rides:", error);
+  }
+}
+
 function startIdleMonitor() {
   // Run every 15 minutes
-  setInterval(checkIdleDrivers, 15 * 60 * 1000);
-  console.log("[idleMonitor] Started idle driver monitor.");
+  setInterval(() => {
+    checkIdleDrivers();
+    checkStuckRides();
+  }, 15 * 60 * 1000);
+  console.log("[idleMonitor] Started idle driver & stuck ride monitor.");
 }
 
 module.exports = { startIdleMonitor };
