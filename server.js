@@ -27,6 +27,7 @@ const passengerSettingsRouter   = require('./routes/passenger/settings');
 const passengerDiscountRouter   = require('./routes/passenger/discount');
 const adminDiscountRouter       = require('./routes/admin/discount');
 const adminFlaggedRouter        = require('./routes/admin/flagged');
+const adminSuspendedRouter      = require('./routes/admin/suspended');
 const mapsRouter                = require('./routes/maps');
 const chatMediaRouter           = require('./routes/chatMedia');
 const adminDashboardRouter        = require('./routes/admin/dashboard');
@@ -86,6 +87,7 @@ app.use('/passenger/settings', passengerSettingsRouter);
 app.use('/passenger/discount', passengerDiscountRouter);
 app.use('/admin/discount-applications', adminDiscountRouter);
 app.use('/admin/flagged-accounts', adminFlaggedRouter);
+app.use('/admin/suspended-accounts', adminSuspendedRouter);
 app.use('/maps', mapsRouter);
 app.use('/chat', chatMediaRouter);
 

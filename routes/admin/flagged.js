@@ -66,21 +66,46 @@ router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, a
       return res.json({ message: "Flag cleared", user });
     } 
     
-    if (action === "warning") {
-      user.warningCount += 1;
+    if (action === "temp_suspend") {
+      const { durationDays } = req.body;
+      if (!durationDays || durationDays < 3 || durationDays > 30) {
+        return res.status(400).json({ message: "Invalid duration. Must be between 3 and 30 days." });
+      }
+      user.isSuspended = true;
+      user.suspensionType = "temp_suspend";
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + durationDays);
+      user.suspensionEndDate = endDate;
+      user.isFlagged = false; // Usually clearing flag when moving to suspension
+      user.refreshToken = null;
+      user.pushTokens = [];
       await user.save();
-      sendToUser(user._id, "account_warning", { message: "You have received an official warning from Finder Administrators regarding recent policy violations." });
-      return res.json({ message: "Warning sent", user });
-    } 
-    
-    if (action === "restrict") {
-      // Temp restriction for 7 days
-      const restrictUntil = new Date();
-      restrictUntil.setDate(restrictUntil.getDate() + 7);
-      user.restrictionEndDate = restrictUntil;
+      sendToUser(user._id, "account_suspended", { message: `Your account has been temporarily suspended for ${durationDays} days.`, type: "temp_suspend" });
+      return res.json({ message: "Account temporarily suspended", user });
+    }
+
+    if (action === "suspend_resolved") {
+      user.isSuspended = true;
+      user.suspensionType = "suspend_resolved";
+      user.suspensionEndDate = null;
+      user.isFlagged = false;
+      user.refreshToken = null;
+      user.pushTokens = [];
       await user.save();
-      sendToUser(user._id, "account_restricted", { message: "Your account has been temporarily restricted for 7 days." });
-      return res.json({ message: "Account restricted for 7 days", user });
+      sendToUser(user._id, "account_suspended", { message: "Your account has been suspended until resolved.", type: "suspend_resolved" });
+      return res.json({ message: "Account suspended until resolved", user });
+    }
+
+    if (action === "perm_suspend") {
+      user.isSuspended = true;
+      user.suspensionType = "perm_suspend";
+      user.suspensionEndDate = null;
+      user.isFlagged = false;
+      user.refreshToken = null;
+      user.pushTokens = [];
+      await user.save();
+      sendToUser(user._id, "account_suspended", { message: "Your account has been permanently suspended.", type: "perm_suspend" });
+      return res.json({ message: "Account permanently suspended", user });
     }
 
     return res.status(400).json({ message: "Invalid action" });

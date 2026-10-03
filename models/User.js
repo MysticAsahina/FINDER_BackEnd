@@ -138,6 +138,19 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isSuspended: {
+      type: Boolean,
+      default: false,
+    },
+    suspensionType: {
+      type: String,
+      enum: ['temp_suspend', 'suspend_resolved', 'perm_suspend', null],
+      default: null,
+    },
+    suspensionEndDate: {
+      type: Date,
+      default: null,
+    },
     strikes: [{
       type: { type: String, enum: ['frequent_cancellation', 'unresponsive_passenger', 'unresponsive_driver'] },
       rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' },

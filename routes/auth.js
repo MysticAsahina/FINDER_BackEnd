@@ -178,6 +178,32 @@ function hashToken (token) {
 const invalidCredentials = (res) =>
   res.status(401).json({ message: "Invalid credentials." });
 
+async function checkSuspension(user, res) {
+  if (user.isSuspended) {
+    if (user.suspensionType === 'temp_suspend' && user.suspensionEndDate && new Date() > user.suspensionEndDate) {
+      // Suspension has expired, lift it
+      user.isSuspended = false;
+      user.suspensionType = null;
+      user.suspensionEndDate = null;
+      await user.save();
+      return false; // Proceed with login
+    }
+    
+    // Still suspended
+    let msg = "Your account is suspended.";
+    if (user.suspensionType === 'temp_suspend') {
+      msg = `Your account is temporarily suspended until ${user.suspensionEndDate.toLocaleDateString()}.`;
+    } else if (user.suspensionType === 'suspend_resolved') {
+      msg = "Your account is suspended indefinitely pending resolution.";
+    } else if (user.suspensionType === 'perm_suspend') {
+      msg = "Your account has been permanently suspended.";
+    }
+    res.status(403).json({ message: msg });
+    return true; // Indicates suspension blocked login
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Role-specific login strategies
 // ---------------------------------------------------------------------------
@@ -202,6 +228,8 @@ async function loginAdmin(req, res) {
     return invalidCredentials(res);
   }
 
+  if (await checkSuspension(user, res)) return;
+
   const rememberMe = req.body.rememberMe === true;
   await createAndSendEmailOtp(user._id, user.email);
 
@@ -225,6 +253,8 @@ async function loginPassenger(req, res) {
   const isMatch = await user.comparePassword(password);
   if (!isMatch) return invalidCredentials(res);
 
+  if (await checkSuspension(user, res)) return;
+
   const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
 
@@ -247,6 +277,8 @@ async function loginDriver(req, res) {
 
   const isMatch = await user.comparePassword(password);
   if (!isMatch) return invalidCredentials(res);
+
+  if (await checkSuspension(user, res)) return;
 
   const rememberMe = req.body.rememberMe === true;
   await sendOtp(user._id, user.mobileNumber);
@@ -491,6 +523,8 @@ router.post("/refresh", async (req, res) => {
         message: "Invalid refresh token"
       });
     }
+
+    if (await checkSuspension(user, res)) return;
 
     const tokenV = decoded.tokenVersion || 0;
     if (user.tokenVersion !== tokenV) {
