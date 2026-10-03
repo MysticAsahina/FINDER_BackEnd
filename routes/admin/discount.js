@@ -3,6 +3,7 @@ const { authenticate, requireRole } = require("../../middleware/auth");
 const DiscountApplication = require("../../models/DiscountApplication");
 const User = require("../../models/User");
 const rateLimit = require("express-rate-limit");
+const { broadcastToAdmins } = require("../../services/socket");
 
 const actionLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -80,6 +81,10 @@ router.patch("/:id", authenticate, requireRole("admin"), actionLimiter, async (r
         await user.save();
       }
     }
+
+    // Reuse the same event the driver-applications flow emits — App.jsx
+    // already listens for this and refetches the sidebar badge counts.
+    broadcastToAdmins('application_resolved', { discountApplicationId: app._id });
 
     res.json({ message: `Application ${app.status} successfully.`, application: app });
   } catch (error) {
