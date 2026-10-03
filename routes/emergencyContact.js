@@ -96,9 +96,9 @@ router.patch("/", emergencyContactLimiter, authenticate, async (req, res) => {
 
 // POST /emergency-contact/trigger
 // Triggers an emergency SMS alert to the configured contact
-router.post("/trigger", authenticate, requireRole("passenger"), emergencyTriggerLimiter, async (req, res) => {
+router.post("/trigger", authenticate, requireRole("passenger", "driver"), emergencyTriggerLimiter, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("firstName lastName emergencyContact");
+    const user = await User.findById(req.user.id).select("firstName lastName emergencyContact role");
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -110,19 +110,35 @@ router.post("/trigger", authenticate, requireRole("passenger"), emergencyTrigger
     const { latitude, longitude } = req.body;
 
     const Ride = require("../models/Ride");
-    const activeRide = await Ride.findOne({
-      passengerId: user._id,
+    
+    // Find active ride based on user role
+    const rideQuery = {
       status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
-    }).populate("driverId", "firstName lastName driverDetails mobileNumber");
+    };
+    if (user.role === "driver") {
+      rideQuery.driverId = user._id;
+    } else {
+      rideQuery.passengerId = user._id;
+    }
+
+    const activeRide = await Ride.findOne(rideQuery).populate(
+      user.role === "driver" ? "passengerId" : "driverId",
+      "firstName lastName driverDetails mobileNumber"
+    );
 
     const contact = user.emergencyContact;
     let message = `EMERGENCY ALERT: ${user.firstName} ${user.lastName} has triggered an emergency alert during their Finder ride.`;
 
-    if (activeRide && activeRide.driverId) {
-      const driver = activeRide.driverId;
-      const plateNo = driver.driverDetails?.plateNumber || 'Unknown';
-      const vehicle = driver.driverDetails?.vehicleType || 'Vehicle';
-      message += ` Driver: ${driver.firstName} ${driver.lastName}, ${vehicle} (Plate: ${plateNo}).`;
+    if (activeRide) {
+      if (user.role === "passenger" && activeRide.driverId) {
+        const driver = activeRide.driverId;
+        const plateNo = driver.driverDetails?.plateNumber || 'Unknown';
+        const vehicle = driver.driverDetails?.vehicleType || 'Vehicle';
+        message += ` Driver: ${driver.firstName} ${driver.lastName}, ${vehicle} (Plate: ${plateNo}).`;
+      } else if (user.role === "driver" && activeRide.passengerId) {
+        const passenger = activeRide.passengerId;
+        message += ` Passenger: ${passenger.firstName} ${passenger.lastName}.`;
+      }
     }
 
     if (latitude && longitude) {
