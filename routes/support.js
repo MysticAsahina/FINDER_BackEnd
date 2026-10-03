@@ -290,13 +290,23 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
 // Resolve a ticket
 router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
   try {
-  if (req.user.role !== "admin") {
-    return res.status(403).json({ message: "Only admins can resolve tickets." });
-  }
+
+
+
 
   const ticket = await SupportTicket.findById(req.params.ticketId);
 
-  if (!ticket) {
+
+
+
+
+
+
+  if (!ticket) return res.status(404).json({ message: "Ticket not found." }); if (req.user.role !== "admin" && ticket.userId.toString() !== req.user.id) {
+    return res.status(403).json({ message: "You can only resolve your own tickets." });
+  }
+
+  if (false) {
     return res.status(404).json({ message: "Ticket not found." });
   }
 

@@ -74,13 +74,115 @@ async function checkStuckRides() {
   }
 }
 
+const SupportTicket = require("../models/SupportTicket");
+const ChatMessage = require("../models/ChatMessage");
+const { broadcastToTicket, broadcastTicketResolved, broadcastToAdmins } = require("./socket");
+
+const TICKET_WARNING_MS = 48 * 60 * 60 * 1000; // 48 hours
+const TICKET_CLOSE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const WARNING_TEXT = "We haven't heard from you in a while. We will close this ticket in 24 hours if we don't receive a response.";
+const CLOSE_TEXT = "This ticket has been automatically resolved due to inactivity. If you still need help, please open a new ticket.";
+
+async function checkStaleSupportTickets() {
+  try {
+    const openTickets = await SupportTicket.find({ status: "open" });
+    const now = Date.now();
+
+    for (const ticket of openTickets) {
+      // Find the last message
+      const lastMessage = await ChatMessage.findOne({ ticketId: ticket._id }).sort({ createdAt: -1 });
+      if (!lastMessage) continue; // Should not happen, but safe to skip
+
+      const timeSinceLastMessage = now - lastMessage.createdAt.getTime();
+
+      // If the last message was NOT from an admin, it means the admin hasn't responded yet.
+      if (lastMessage.senderRole !== "admin") {
+        // If 7 days have passed and admin still hasn't responded, auto-close with apology to free user's queue
+        if (timeSinceLastMessage >= 7 * 24 * 60 * 60 * 1000) {
+          const apologyMsg = await ChatMessage.create({
+            ticketId: ticket._id,
+            senderId: lastMessage.senderId, // User's ID is fine here since it's a system action
+            senderRole: "admin", // Sent as admin for authority
+            body: "We apologize for the delayed response. Due to high support volume, this ticket has been automatically closed to free up your queue. If your issue persists, please open a new ticket."
+          });
+
+          ticket.status = "resolved";
+          ticket.updatedAt = new Date();
+          await ticket.save();
+
+          broadcastToTicket(ticket._id.toString(), apologyMsg);
+          broadcastTicketResolved(ticket._id.toString());
+          broadcastToAdmins("ticket_updated", {
+            ticketId: ticket._id.toString(),
+            updatedAt: ticket.updatedAt,
+            status: ticket.status
+          });
+          console.log(`[idleMonitor] Ticket ${ticket._id} auto-resolved after 7 days of admin inactivity.`);
+        }
+        continue;
+      }
+
+      if (lastMessage.body === WARNING_TEXT) {
+        // We already sent the warning. Has it been 24 hours since the warning?
+        if (timeSinceLastMessage >= TICKET_CLOSE_MS) {
+          // Close ticket
+          const closeMsg = await ChatMessage.create({
+            ticketId: ticket._id,
+            senderId: lastMessage.senderId, // Use the same admin who sent the warning
+            senderRole: "admin",
+            body: CLOSE_TEXT
+          });
+
+          ticket.status = "resolved";
+          ticket.updatedAt = new Date();
+          await ticket.save();
+
+          broadcastToTicket(ticket._id.toString(), closeMsg);
+          broadcastTicketResolved(ticket._id.toString());
+          broadcastToAdmins("ticket_updated", {
+            ticketId: ticket._id.toString(),
+            updatedAt: ticket.updatedAt,
+            status: ticket.status
+          });
+          console.log(`[idleMonitor] Ticket ${ticket._id} auto-resolved due to inactivity.`);
+        }
+      } else {
+        // Last message was a regular admin reply. Has it been 48 hours?
+        if (timeSinceLastMessage >= TICKET_WARNING_MS) {
+          // Send warning
+          const warningMsg = await ChatMessage.create({
+            ticketId: ticket._id,
+            senderId: lastMessage.senderId, // Use the same admin who replied last
+            senderRole: "admin",
+            body: WARNING_TEXT
+          });
+
+          ticket.updatedAt = new Date();
+          await ticket.save();
+
+          broadcastToTicket(ticket._id.toString(), warningMsg);
+          broadcastToAdmins("ticket_updated", {
+            ticketId: ticket._id.toString(),
+            updatedAt: ticket.updatedAt,
+            status: ticket.status
+          });
+          console.log(`[idleMonitor] Ticket ${ticket._id} sent 48h inactivity warning.`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("[idleMonitor] Error checking stale tickets:", error);
+  }
+}
+
 function startIdleMonitor() {
   // Run every 15 minutes
   setInterval(() => {
     checkIdleDrivers();
     checkStuckRides();
+    checkStaleSupportTickets();
   }, 15 * 60 * 1000);
-  console.log("[idleMonitor] Started idle driver & stuck ride monitor.");
+  console.log("[idleMonitor] Started idle driver, stuck ride, and stale ticket monitor.");
 }
 
 module.exports = { startIdleMonitor };
