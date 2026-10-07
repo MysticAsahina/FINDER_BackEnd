@@ -23,9 +23,13 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ message: "Token is not yet fully authenticated." });
     }
 
-    const user = await User.findById(decoded.id).select("tokenVersion");
+    const user = await User.findById(decoded.id).select("tokenVersion isSuspended");
     if (!user) {
       return res.status(401).json({ message: "User no longer exists." });
+    }
+
+    if (user.isSuspended) {
+      return res.status(403).json({ message: "Account suspended." });
     }
 
     const tokenV = decoded.tokenVersion || 0;
