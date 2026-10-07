@@ -470,17 +470,15 @@ router.post("/submit", submitLimiter, async (req, res) => {
       return res.status(409).json({ message: "This number is already registered as a driver." });
     }
 
-    const existingLicense = await DriverApplication.findOne({
-      licenseNumber: licenseNumber.trim(),
-    });
-    if (existingLicense) {
+    const existingLicenseApp = await DriverApplication.findOne({ licenseNumber: licenseNumber.trim() });
+    const existingLicenseUser = await User.findOne({ "driverDetails.licenseNumber": licenseNumber.trim() });
+    if (existingLicenseApp || existingLicenseUser) {
       return res.status(409).json({ message: "This license number is already in use." });
     }
 
-    const existingPlate = await DriverApplication.findOne({
-      plateNumber: plateNumber.trim().toUpperCase(),
-    });
-    if (existingPlate) {
+    const existingPlateApp = await DriverApplication.findOne({ plateNumber: plateNumber.trim().toUpperCase() });
+    const existingPlateUser = await User.findOne({ "driverDetails.plateNumber": plateNumber.trim().toUpperCase() });
+    if (existingPlateApp || existingPlateUser) {
       return res.status(409).json({ message: "This plate number is already in use." });
     }
 

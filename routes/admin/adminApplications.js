@@ -285,7 +285,13 @@ router.post("/:id/approve", actionLimiter, async (req, res) => {
 
   } catch (err) {
     if (err.code === 11000) {
-      return res.status(409).json({ message: "Duplicate entry detected." });
+      let duplicateField = "entry";
+      if (err.keyPattern) {
+        if (err.keyPattern.mobileNumber) duplicateField = "mobile number";
+        else if (err.keyPattern['driverDetails.licenseNumber']) duplicateField = "license number";
+        else if (err.keyPattern['driverDetails.plateNumber']) duplicateField = "plate number";
+      }
+      return res.status(409).json({ message: `A driver with this ${duplicateField} already exists.` });
     }
     console.error("[admin/applications/:id/approve]", err);
     return res.status(500).json({ message: "Server error. Please try again." });

@@ -63,12 +63,12 @@ router.patch("/:id", authenticate, requireRole("admin"), actionLimiter, async (r
       return res.status(404).json({ message: "Application not found." });
     }
 
-    app.status = status.toLowerCase();
-    if (app.status === "rejected") {
-      app.rejectionReason = reason || "Application rejected by Admin.";
+    if (status.toLowerCase() === "rejected") {
+      await DiscountApplication.findByIdAndDelete(app._id);
+    } else {
+      app.status = "approved";
+      await app.save();
     }
-
-    await app.save();
 
     // Update the user's discount profile if approved
     if (app.status === "approved") {

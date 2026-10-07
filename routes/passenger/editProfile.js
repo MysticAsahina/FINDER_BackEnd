@@ -50,7 +50,12 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), as
 
   if (mobileNumber) {
     const mobileError = validateMobileFormat(mobileNumber.trim());
-    if (mobileError) errors.push(mobileError);
+    if (mobileError) {
+      errors.push(mobileError);
+    } else {
+      const existing = await User.findOne({ mobileNumber: mobileNumber.trim(), role: "passenger", _id: { $ne: req.user.id } });
+      if (existing) errors.push("This mobile number is already in use.");
+    }
   } else {
     errors.push("Mobile number is required.");
   }

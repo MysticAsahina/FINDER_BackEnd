@@ -658,9 +658,9 @@ router.post("/forgot-password/admin", forgotPasswordLimiter, async (req, res) =>
 // POST /auth/forgot-password
 // ---------------------------------------------------------------------------
 router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
-  let { mobileNumber } = req.body;
+  let { mobileNumber, role } = req.body;
 
-  if (typeof mobileNumber !== "string") {
+  if (typeof mobileNumber !== "string" || !role) {
     return res.status(400).json({ message: "Invalid input." });
   }
 
@@ -669,7 +669,7 @@ router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   if (mobileError) return res.status(400).json({ message: mobileError });
 
   try {
-    const user = await User.findOne({ mobileNumber });
+    const user = await User.findOne({ mobileNumber, role });
     if (!user) {
       // Don't reveal if user exists or not for security? 
       // It's a mobile number, usually fine. But returning 404 is okay.

@@ -219,8 +219,7 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             }
 
             if (requiresOverride) {
-                // Broadcast to room just in case, but also send directly to passenger's socket to prevent sync issues
-                broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
+                // Send directly to passenger's socket
                 sendToUser(ride.passengerId, "override_request", { rideId: ride._id, status });
                 return res.status(400).json({ code: "GPS_TOO_FAR", message: "Location could not be verified or is too far. Waiting for passenger override." });
             }

@@ -164,7 +164,7 @@ const userSchema = new mongoose.Schema(
 // Indexes
 // ---------------------------------------------------------------------------
 userSchema.index({ email: 1 },                              { unique: true, sparse: true });
-userSchema.index({ mobileNumber: 1 },                       { unique: true });
+userSchema.index({ mobileNumber: 1, role: 1 },                { unique: true });
 userSchema.index({ "driverDetails.licenseNumber": 1 },      { unique: true, sparse: true });
 userSchema.index({ "driverDetails.plateNumber": 1 },        { unique: true, sparse: true });
 

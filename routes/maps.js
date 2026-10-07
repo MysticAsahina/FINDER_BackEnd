@@ -20,7 +20,7 @@ const gmapsAuth = (req, res, next) => {
 
 const gmapsLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 60,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req, res) => req.user?.id || rateLimit.ipKeyGenerator(req, res),

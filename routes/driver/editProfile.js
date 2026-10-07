@@ -78,6 +78,7 @@ router.patch(
         } else {
           const existing = await User.findOne({
             mobileNumber: req.body.mobileNumber,
+            role: "driver",
             _id: { $ne: user._id },
           });
           if (existing) {
