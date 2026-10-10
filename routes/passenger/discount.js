@@ -55,6 +55,11 @@ router.post("/apply", authenticate, requireRole("passenger"), applyLimiter, asyn
       status: "pending",
     });
 
+    const user = await User.findById(req.user.id);
+    if (user.isDiscountVerified) {
+      return res.status(400).json({ message: "You already have a verified discount application." });
+    }
+
     if (existingPending) {
       return res.status(400).json({ message: "You already have a pending discount application." });
     }
@@ -89,6 +94,20 @@ router.post("/apply", authenticate, requireRole("passenger"), applyLimiter, asyn
     res.status(201).json({ message: "Application submitted successfully.", application: newApplication });
   } catch (error) {
     console.error("[passenger-discount-apply]", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/status", authenticate, requireRole("passenger"), async (req, res) => {
+  try {
+    const existingPending = await DiscountApplication.findOne({
+      passengerId: req.user.id,
+      status: "pending",
+    });
+
+    res.json({ pending: !!existingPending });
+  } catch (error) {
+    console.error("[passenger-discount-status]", error);
     res.status(500).json({ message: "Server error" });
   }
 });
