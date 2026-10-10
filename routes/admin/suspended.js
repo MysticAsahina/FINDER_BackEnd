@@ -32,7 +32,8 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
         name: `${user.firstName} ${user.lastName}`,
         role: user.role.charAt(0).toUpperCase() + user.role.slice(1),
         suspensionType: typeLabel,
-        suspensionEndDate: user.suspensionEndDate
+        suspensionEndDate: user.suspensionEndDate,
+        reason: user.suspensionReason || "N/A"
       };
     });
 
@@ -62,6 +63,7 @@ router.post("/:id/lift", authenticate, requireRole("admin"), actionLimiter, asyn
 
     user.isSuspended = false;
     user.suspensionType = null;
+    user.suspensionReason = null;
     user.suspensionEndDate = null;
     await user.save();
 

@@ -50,7 +50,7 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
 // PATCH /admin/flagged-accounts/:id/action
 router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, async (req, res) => {
   try {
-    const { action } = req.body; // 'clear', 'warning', 'restrict'
+    const { action, reason } = req.body; // 'clear', 'warning', 'restrict'
     const user = await User.findById(req.params.id);
 
     if (!user) {
@@ -73,6 +73,7 @@ router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, a
       }
       user.isSuspended = true;
       user.suspensionType = "temp_suspend";
+      user.suspensionReason = reason || null;
       const endDate = new Date();
       endDate.setDate(endDate.getDate() + durationDays);
       user.suspensionEndDate = endDate;
@@ -87,6 +88,7 @@ router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, a
     if (action === "suspend_resolved") {
       user.isSuspended = true;
       user.suspensionType = "suspend_resolved";
+      user.suspensionReason = reason || null;
       user.suspensionEndDate = null;
       user.isFlagged = false;
       user.refreshToken = null;
@@ -99,6 +101,7 @@ router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, a
     if (action === "perm_suspend") {
       user.isSuspended = true;
       user.suspensionType = "perm_suspend";
+      user.suspensionReason = reason || null;
       user.suspensionEndDate = null;
       user.isFlagged = false;
       user.refreshToken = null;

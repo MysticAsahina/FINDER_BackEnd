@@ -147,6 +147,10 @@ const userSchema = new mongoose.Schema(
       enum: ['temp_suspend', 'suspend_resolved', 'perm_suspend', null],
       default: null,
     },
+    suspensionReason: {
+      type: String,
+      default: null,
+    },
     suspensionEndDate: {
       type: Date,
       default: null,
