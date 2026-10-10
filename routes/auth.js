@@ -585,6 +585,38 @@ router.post("/refresh", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /auth/me
+// ---------------------------------------------------------------------------
+router.get("/me", authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    const userPayload = {
+        id: user._id,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        mobileNumber: user.mobileNumber,
+        email: user.email || null,
+        emergencyContact: user.emergencyContact || null,
+    };
+
+    if (user.role === "passenger") {
+        userPayload.isDiscountVerified = user.isDiscountVerified;
+        userPayload.discountType = user.discountType;
+    }
+
+    if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
+
+    res.json({ user: userPayload });
+  } catch (err) {
+    console.error("[auth/me]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /auth/logout
 // ---------------------------------------------------------------------------
 router.post("/logout", async (req, res) => {

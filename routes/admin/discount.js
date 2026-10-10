@@ -65,6 +65,16 @@ router.patch("/:id", authenticate, requireRole("admin"), actionLimiter, async (r
 
     if (status.toLowerCase() === "rejected") {
       await DiscountApplication.findByIdAndDelete(app._id);
+      
+      // Also unverify the user in case this was an approved application being revoked
+      const user = await User.findById(app.passengerId);
+      if (user) {
+        user.isDiscountVerified = false;
+        user.discountType = null;
+        user.discountIdNumber = null;
+        user.discountExpiration = null;
+        await user.save();
+      }
     } else {
       app.status = "approved";
       await app.save();
