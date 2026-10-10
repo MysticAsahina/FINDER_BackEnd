@@ -5,6 +5,7 @@
 function validateName(value, field) {
   if (!value || !value.trim()) return `${field} is required.`;
   if (value.trim().length > 50) return `${field} is too long.`;
+  if (!/^[A-Za-z\s'-]+$/.test(value)) return `${field} can only contain letters, spaces, hyphens, and apostrophes.`;
   return null;
 }
 
