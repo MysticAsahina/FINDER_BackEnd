@@ -3,8 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const User = require('../models/User');
 const WalletTransaction = require('../models/WalletTransaction');
-const authenticate = require('../middleware/authenticate');
-const requireRole = require('../middleware/requireRole');
+const { authenticate, requireRole } = require('../middleware/auth');
 const { getIO } = require('../services/socket');
 
 const router = express.Router();

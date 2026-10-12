@@ -1,8 +1,7 @@
 const express = require('express');
 const User = require('../../models/User');
 const WalletTransaction = require('../../models/WalletTransaction');
-const authenticate = require('../../middleware/authenticate');
-const requireRole = require('../../middleware/requireRole');
+const { authenticate, requireRole } = require('../../middleware/auth');
 
 const router = express.Router();
 
