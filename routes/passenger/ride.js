@@ -244,8 +244,8 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
     // Instantly join the passenger to the ride's socket room
     joinUserToRoom(req.user.id, ride._id.toString());
 
-    if (paymentMethod === "cash") {
-      // Start matching process asynchronously only if cash (paymongo will start on webhook)
+    if (paymentMethod === "cash" || paymentMethod === "wallet") {
+      // Start matching process asynchronously for cash and wallet (paymongo will start on webhook)
       matchRide(ride._id);
     }
 

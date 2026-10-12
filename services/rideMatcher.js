@@ -62,6 +62,7 @@ async function matchRide(rideId) {
       dropoff: ride.dropoff,
       fare: ride.fare,
       distanceKm: ride.distanceKm,
+      paymentMethod: ride.paymentMethod,
     });
 
     // Send push notification to driver
