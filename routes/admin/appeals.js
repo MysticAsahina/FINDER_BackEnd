@@ -5,7 +5,7 @@ const User = require("../../models/User");
 const Appeal = require("../../models/Appeal");
 const { logAdminAction } = require("../../utils/auditLogger");
 const { sendToUser, broadcastToAdmins } = require("../../services/socket");
-const { createAndSendEmailOtp } = require("../../utils/otpManager");
+const { createAndSendEmailOtp, sendSms } = require("../../utils/otpManager");
 
 const actionLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -106,6 +106,14 @@ router.patch("/:id/lift", authenticate, requireRole("admin"), actionLimiter, asy
       message: "Your appeal has been approved and your account suspension has been lifted.",
     });
 
+    // Notify user via IProgSMS (non-blocking)
+    if (user.mobileNumber) {
+      sendSms(
+        user.mobileNumber,
+        `FINDER: Great news, ${user.firstName}! Your appeal for Ticket #${appeal.ticketNumber} has been APPROVED. Your account suspension has been lifted and you can now log in and use FINDER.`
+      ).catch((smsErr) => console.error("[admin/appeals-lift-sms]", smsErr));
+    }
+
     logAdminAction(
       req,
       req.user.id,
@@ -176,6 +184,15 @@ router.patch("/:id/disable", authenticate, requireRole("admin"), actionLimiter, 
     sendToUser(user._id, "appeal_rejected", {
       message: "Your suspension appeal has been denied.",
     });
+
+    // Notify user via IProgSMS (non-blocking)
+    if (user.mobileNumber) {
+      const reasonDetail = reason && reason.trim() ? ` Reason: ${reason.trim()}.` : "";
+      sendSms(
+        user.mobileNumber,
+        `FINDER: Hello, ${user.firstName}. Your appeal for Ticket #${appeal.ticketNumber} has been REVIEWED and DENIED.${reasonDetail} Your account suspension remains in effect.`
+      ).catch((smsErr) => console.error("[admin/appeals-disable-sms]", smsErr));
+    }
 
     logAdminAction(
       req,

@@ -42,7 +42,8 @@ async function sendSms(mobileNumber, message) {
         body: JSON.stringify({
           api_token: iProgSmsToken,
           phone_number: mobileNumber,
-          message: message
+          message: message,
+          sms_provider: 1
         }),
         signal: AbortSignal.timeout(5000)
       });
