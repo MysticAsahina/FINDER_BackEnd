@@ -983,6 +983,42 @@ router.delete("/delete-account", authenticate, requireRole("passenger", "driver"
   }
 });
 
+/**
+ * Helper to safely extract Cloudinary public ID for profile picture assets.
+ * Only targets images stored in the "profile-pictures" folder to prevent
+ * accidental deletion of verification documents or chat media.
+ */
+function extractProfilePicturePublicId(url) {
+  if (!url || typeof url !== "string") return null;
+  try {
+    const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
+    if (!match) return null;
+    const withExt = match[1];
+    const publicId = withExt.replace(/\.[^.]+$/, "");
+    if (publicId.startsWith("profile-pictures/")) {
+      return publicId;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Helper to delete an old profile picture from Cloudinary.
+ */
+async function deleteOldProfilePicture(url) {
+  const publicId = extractProfilePicturePublicId(url);
+  if (!publicId) return;
+  try {
+    await cloudinary.uploader.destroy(publicId);
+  } catch (err) {
+    console.warn(`[auth/profile-picture] Failed to delete old image ${publicId}:`, err?.message || err);
+  }
+}
+
+const MAX_PROFILE_PICTURE_BYTES = 5 * 1024 * 1024; // 5MB
+
 // ---------------------------------------------------------------------------
 // PATCH /auth/profile-picture & POST /auth/profile-picture
 // Updates or removes the authenticated user's profile picture.
@@ -993,9 +1029,22 @@ const handleProfilePictureUpdate = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found." });
 
+    const previousPicture = user.profilePicture;
+
     if (!profilePicture) {
       user.profilePicture = null;
+      await user.save();
+      if (previousPicture) {
+        await deleteOldProfilePicture(previousPicture);
+      }
     } else if (typeof profilePicture === "string" && profilePicture.startsWith("data:image/")) {
+      // Calculate binary size from base64 string
+      const base64Data = profilePicture.split(",")[1] || profilePicture;
+      const sizeInBytes = (base64Data.length * 3) / 4;
+      if (sizeInBytes > MAX_PROFILE_PICTURE_BYTES) {
+        return res.status(400).json({ message: "Profile picture size must not exceed 5MB." });
+      }
+
       const uploadRes = await cloudinary.uploader.upload(profilePicture, {
         folder: "profile-pictures",
         transformation: [
@@ -1003,13 +1052,21 @@ const handleProfilePictureUpdate = async (req, res) => {
         ],
       });
       user.profilePicture = uploadRes.secure_url;
+      await user.save();
+
+      if (previousPicture && previousPicture !== user.profilePicture) {
+        await deleteOldProfilePicture(previousPicture);
+      }
     } else if (typeof profilePicture === "string" && (profilePicture.startsWith("http://") || profilePicture.startsWith("https://"))) {
       user.profilePicture = profilePicture;
+      await user.save();
+
+      if (previousPicture && previousPicture !== user.profilePicture) {
+        await deleteOldProfilePicture(previousPicture);
+      }
     } else {
       return res.status(400).json({ message: "Invalid image format." });
     }
-
-    await user.save();
 
     const userPayload = buildUserPayload(user);
 
