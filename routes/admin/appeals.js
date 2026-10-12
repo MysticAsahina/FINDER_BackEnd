@@ -152,7 +152,7 @@ router.patch("/:id/disable", authenticate, requireRole("admin"), actionLimiter, 
     const reasonNote = reason ? ` Reason: ${reason.trim()}` : "";
     const sysMessage = {
       senderRole: "system",
-      body: `Appeal rejected. Decision rendered by Administrator on ${dateStr}.${reasonNote}`,
+      body: `Appeal denied. Decision rendered by Administrator on ${dateStr}.${reasonNote}`,
       createdAt: new Date(),
     };
 
@@ -161,35 +161,35 @@ router.patch("/:id/disable", authenticate, requireRole("admin"), actionLimiter, 
     appeal.messages.push(sysMessage);
     await appeal.save();
 
-    // Cascading quota & disablement check
+    // Cascading quota & disablement check (upholding suspension)
     let maxAppeals = 1;
     if (user.suspensionType === "suspend_resolved") {
       maxAppeals = 2;
     }
 
-    // If permanent suspension or all appeal quotas exhausted, permanently archive
+    // If permanent suspension or all appeal quotas exhausted, permanently archive (no further appeals permitted)
     if (user.suspensionType === "perm_suspend" || (user.appealCount || 0) >= maxAppeals) {
       user.isPermanentlyDisabled = true;
     }
     await user.save();
 
     sendToUser(user._id, "appeal_rejected", {
-      message: "Your suspension appeal was rejected.",
+      message: "Your suspension appeal has been denied.",
     });
 
     logAdminAction(
       req,
       req.user.id,
       `${user.firstName} ${user.lastName}`,
-      "APPEAL_REJECTED",
-      `Rejected appeal ${appeal.ticketNumber} for ${user.role} ${user.firstName} ${user.lastName}.${reasonNote}`
+      "APPEAL_DENIED",
+      `Denied appeal ${appeal.ticketNumber} for ${user.role} ${user.firstName} ${user.lastName}.${reasonNote}`
     );
 
     broadcastToAdmins("appeal_resolved", { appealId: appeal._id });
 
     return res.status(200).json({
       success: true,
-      message: "Appeal rejected and account status updated.",
+      message: "Appeal denied and suspension maintained.",
       appeal,
     });
   } catch (err) {
