@@ -155,6 +155,14 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    appealCount: {
+      type: Number,
+      default: 0,
+    },
+    isPermanentlyDisabled: {
+      type: Boolean,
+      default: false,
+    },
     strikes: [{
       type: { type: String, enum: ['frequent_cancellation', 'unresponsive_passenger', 'unresponsive_driver'] },
       rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' },

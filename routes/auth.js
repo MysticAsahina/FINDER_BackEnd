@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const Appeal = require("../models/Appeal");
 const ActiveDriver = require("../models/ActiveDriver");
 const Ride = require("../models/Ride");
 const { logAdminAction } = require("../utils/auditLogger");
@@ -183,6 +184,14 @@ function signResetPasswordToken(user) {
   );
 }
 
+function signAppealToken(user) {
+  return jwt.sign(
+    { id: user._id, role: user.role, isAppealSession: true },
+    process.env.PENDING_SECRET,
+    { expiresIn: "24h" }
+  );
+}
+
 function hashToken (token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
@@ -197,20 +206,91 @@ async function checkSuspension(user, res) {
       user.isSuspended = false;
       user.suspensionType = null;
       user.suspensionEndDate = null;
+      user.appealCount = 0;
       await user.save();
       return false; // Proceed with login
     }
-    
-    // Still suspended
-    let msg = "Your account is suspended.";
-    if (user.suspensionType === 'temp_suspend') {
-      msg = `Your account is temporarily suspended until ${user.suspensionEndDate.toLocaleDateString()}.`;
-    } else if (user.suspensionType === 'suspend_resolved') {
-      msg = "Your account is suspended indefinitely pending resolution.";
-    } else if (user.suspensionType === 'perm_suspend') {
-      msg = "Your account has been permanently suspended.";
+
+    // Check if account is permanently disabled/archived
+    if (user.isPermanentlyDisabled) {
+      res.status(403).json({
+        status: "suspended",
+        message: "Your appeal was rejected. Your account has been permanently disabled and cannot be recovered.",
+        suspension: {
+          type: "perm_suspend",
+          reason: user.suspensionReason,
+          endDate: null,
+          appealsUsed: user.appealCount || 1,
+          maxAppeals: 1,
+          appealsRemaining: 0,
+          hasPendingAppeal: false,
+          pendingAppealId: null,
+          canAppeal: false,
+          isPermanentlyDisabled: true,
+        },
+      });
+      return true;
     }
-    res.status(403).json({ message: msg });
+
+    // Determine max appeals allowed for this suspension tier
+    let maxAppeals = 1;
+    if (user.suspensionType === 'suspend_resolved') {
+      maxAppeals = 2;
+    } else if (user.suspensionType === 'temp_suspend' || user.suspensionType === 'perm_suspend') {
+      maxAppeals = 1;
+    }
+
+    const appealsUsed = user.appealCount || 0;
+    const appealsRemaining = Math.max(0, maxAppeals - appealsUsed);
+
+    // Check if an appeal is currently pending review
+    const pendingAppeal = await Appeal.findOne({ userId: user._id, status: 'pending' });
+    const hasPendingAppeal = !!pendingAppeal;
+
+    const canAppeal = appealsRemaining > 0 && !hasPendingAppeal;
+
+    let msg = "Your account is suspended.";
+    if (hasPendingAppeal) {
+      msg = "Your appeal is currently pending administrative review.";
+    } else if (appealsRemaining === 0) {
+      if (user.suspensionType === 'temp_suspend') {
+        const dateStr = user.suspensionEndDate ? new Date(user.suspensionEndDate).toLocaleDateString() : 'the scheduled end date';
+        msg = `Your appeal was rejected. Your account is temporarily suspended until ${dateStr}. You have exhausted your appeals (1/1) and must wait for the suspension period to conclude.`;
+      } else if (user.suspensionType === 'perm_suspend') {
+        msg = "Your appeal was rejected. Your account has been permanently disabled and cannot be recovered.";
+      } else if (user.suspensionType === 'suspend_resolved') {
+        msg = "Your appeals were rejected (2/2 appeals used). Your account is permanently suspended pending administrative action.";
+      }
+    } else {
+      if (user.suspensionType === 'temp_suspend') {
+        const dateStr = user.suspensionEndDate ? new Date(user.suspensionEndDate).toLocaleDateString() : 'a later date';
+        msg = `Your account is temporarily suspended until ${dateStr}. You have 1 appeal available.`;
+      } else if (user.suspensionType === 'suspend_resolved') {
+        msg = `Your account is suspended indefinitely pending resolution. You have ${appealsRemaining} of 2 appeals remaining.`;
+      } else if (user.suspensionType === 'perm_suspend') {
+        msg = "Your account has been permanently suspended. You may submit 1 appeal.";
+      }
+    }
+
+    const appealToken = signAppealToken(user);
+
+    res.status(403).json({
+      status: "suspended",
+      message: msg,
+      suspension: {
+        type: user.suspensionType,
+        reason: user.suspensionReason,
+        endDate: user.suspensionEndDate,
+        appealsUsed,
+        maxAppeals,
+        appealsRemaining,
+        hasPendingAppeal,
+        pendingAppealId: pendingAppeal ? pendingAppeal._id : null,
+        canAppeal,
+        isPermanentlyDisabled: false,
+      },
+      appealToken,
+    });
     return true; // Indicates suspension blocked login
   }
   return false;
