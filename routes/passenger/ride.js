@@ -357,6 +357,16 @@ router.post("/:id/override", authenticate, requireRole("passenger"), async (req,
       if (ride.driverId) {
         await ActiveDriver.findOneAndUpdate({ driverId: ride.driverId }, { isBusy: false });
       }
+
+      // Atomic Wallet Settlement (if paymentMethod was 'wallet')
+      if (ride.paymentMethod === "wallet") {
+        try {
+          const { settleRideWallet } = require("../../services/walletSettlement");
+          await settleRideWallet(ride, ride.driverId);
+        } catch (walletErr) {
+          console.error("[passenger-ride-override-wallet-error]", walletErr);
+        }
+      }
     }
 
     res.json({ message: "Ride status overridden successfully", ride });
