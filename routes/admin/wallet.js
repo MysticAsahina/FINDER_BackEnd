@@ -21,7 +21,7 @@ router.get('/summary', authenticate, requireRole('admin'), async (req, res) => {
     ]);
 
     const feesCollected = await WalletTransaction.aggregate([
-      { $match: { type: 'cash_in', status: 'completed' } },
+      { $match: { status: 'completed' } },
       { $group: { _id: null, total: { $sum: '$fee' } } },
     ]);
 
@@ -49,26 +49,71 @@ router.get('/summary', authenticate, requireRole('admin'), async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /admin/wallet/transactions - List all transactions across users
+// GET /admin/wallet/transactions - List transactions with optional query filters
 // ---------------------------------------------------------------------------
 router.get('/transactions', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const { type, page = 1, limit = 50 } = req.query;
+    const { type, role, status, date, search, page, limit } = req.query;
     const filter = {};
-    if (type) filter.type = type;
 
-    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    if (type && type !== 'ALL') filter.type = type;
+    if (role && role !== 'ALL') filter.userRole = role;
+    if (status && status !== 'ALL') filter.status = status;
+
+    if (date && date !== 'ALL') {
+      const now = new Date();
+      if (date === 'TODAY') {
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        filter.createdAt = { $gte: startOfDay };
+      } else if (date === 'WEEK') {
+        const weekAgo = new Date();
+        weekAgo.setDate(now.getDate() - 7);
+        filter.createdAt = { $gte: weekAgo };
+      } else if (date === 'MONTH') {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        filter.createdAt = { $gte: startOfMonth };
+      }
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      const userMatches = await User.find({
+        $or: [
+          { firstName: { $regex: q, $options: 'i' } },
+          { lastName: { $regex: q, $options: 'i' } },
+          { mobileNumber: { $regex: q, $options: 'i' } },
+        ],
+      }).select('_id');
+
+      const userIds = userMatches.map((u) => u._id);
+
+      filter.$or = [
+        { referenceNumber: { $regex: q, $options: 'i' } },
+        { description: { $regex: q, $options: 'i' } },
+        { userId: { $in: userIds } },
+      ];
+    }
+
+    const query = WalletTransaction.find(filter)
+      .populate('userId', 'firstName lastName mobileNumber role')
+      .populate('rideId', 'pickup dropoff fare status')
+      .sort({ createdAt: -1 });
+
+    if (page && limit) {
+      const p = Math.max(1, parseInt(page, 10));
+      const l = Math.max(1, parseInt(limit, 10));
+      const skip = (p - 1) * l;
+      query.skip(skip).limit(l);
+    } else if (limit) {
+      query.limit(parseInt(limit, 10));
+    }
 
     const [transactions, total] = await Promise.all([
-      WalletTransaction.find(filter)
-        .populate('userId', 'firstName lastName mobileNumber role')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10)),
+      query.exec(),
       WalletTransaction.countDocuments(filter),
     ]);
 
-    res.json({ transactions, total, page: parseInt(page, 10) });
+    res.json({ transactions, total });
   } catch (err) {
     console.error('[admin-wallet-transactions]', err);
     res.status(500).json({ message: 'Server error retrieving transactions.' });
