@@ -107,6 +107,20 @@ const userSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // --- Wallet & Digital Payments ---
+    walletBalance: {
+      type: Number,
+      default: 0,
+    },
+    savedPayoutDetails: {
+      type: {
+        method: { type: String, default: 'gcash' },
+        accountName: { type: String, default: '' },
+        mobileNumber: { type: String, default: '' },
+      },
+      default: null,
+    },
+
     // --- Emergency Contact (optional for all users) ---
     emergencyContact: {
       type: {

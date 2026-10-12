@@ -58,7 +58,7 @@ const rideSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["cash", "ewallet", "paymongo"],
+      enum: ["cash", "ewallet", "wallet", "paymongo"],
       required: true,
     },
     paymongoLinkId: {
@@ -81,6 +81,10 @@ const rideSchema = new mongoose.Schema(
     fare: {
       type: Number,
       required: true,
+    },
+    undiscountedFare: {
+      type: Number,
+      default: 0,
     },
     distanceKm: {
       type: Number,

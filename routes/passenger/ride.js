@@ -108,9 +108,18 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
       return res.status(400).json({ message: "Payment method is required." });
     }
 
-    if (paymentMethod !== "cash" && paymentMethod !== "paymongo") {
+    if (paymentMethod !== "cash" && paymentMethod !== "wallet" && paymentMethod !== "paymongo") {
       console.log("Unsupported payment method:", paymentMethod);
       return res.status(400).json({ message: "Unsupported payment method." });
+    }
+
+    // Check if passenger has an unsettled negative wallet balance
+    const User = require("../../models/User");
+    const passengerUser = await User.findById(req.user.id);
+    if (passengerUser && (passengerUser.walletBalance || 0) < 0) {
+      return res.status(400).json({
+        message: `You have an unsettled negative balance of ₱${Math.abs(passengerUser.walletBalance).toFixed(2)}. Please cash in to clear your balance before booking.`,
+      });
     }
 
     // Fetch fare settings
@@ -128,8 +137,6 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
 
     if (bFor === "myself") {
       pCount = 1;
-      const User = require("../../models/User");
-      const passengerUser = await User.findById(req.user.id);
       dCount = passengerUser && passengerUser.isDiscountVerified ? 1 : 0;
     } else {
       if (passengerCount && passengerCount > 3) {
@@ -157,6 +164,19 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
 
     calculatedFare = parseFloat((regularFareTotal + discountedFareTotal).toFixed(2));
 
+    // Undiscounted Fare Calculation (what the full price is without any discounts)
+    const undiscountedFare = parseFloat((pCount * (effectiveBaseFare + (extraKm * fareSettings.perKmFare))).toFixed(2));
+
+    // If paying via wallet, passenger MUST have enough balance to cover the undiscounted fare
+    if (paymentMethod === "wallet") {
+      const currentBalance = passengerUser ? (passengerUser.walletBalance || 0) : 0;
+      if (currentBalance < undiscountedFare) {
+        return res.status(400).json({
+          message: `Insufficient Wallet Balance. You need at least ₱${undiscountedFare.toFixed(2)} in your wallet to book this ride (to cover potential non-discounted fares). Your current balance is ₱${currentBalance.toFixed(2)}.`,
+        });
+      }
+    }
+
     const ride = new Ride({
       passengerId: req.user.id,
       pickup: {
@@ -176,6 +196,7 @@ router.post("/request", authenticate, requireRole("passenger"), rideRequestLimit
       paymentMethod: paymentMethod,
       status: paymentMethod === "paymongo" ? "payment_pending" : "pending",
       fare: calculatedFare,
+      undiscountedFare: undiscountedFare,
       distanceKm: distanceKm || 0,
       durationMins: durationMins || 0,
       passengerCount: pCount,

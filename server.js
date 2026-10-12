@@ -36,6 +36,8 @@ const adminBadgesRouter            = require('./routes/admin/badges');
 const paymentRouter                 = require('./routes/passenger/payment');
 const appealsRouter                 = require('./routes/appeals');
 const adminAppealsRouter            = require('./routes/admin/appeals');
+const walletRouter                  = require('./routes/wallet');
+const adminWalletRouter             = require('./routes/admin/wallet');
 
 const http = require("http");
 const socketService = require("./services/socket");
@@ -97,6 +99,8 @@ app.use('/chat', chatMediaRouter);
 app.use('/passenger/payment', paymentRouter);
 app.use('/appeals', appealsRouter);
 app.use('/admin/appeals', adminAppealsRouter);
+app.use('/wallet', walletRouter);
+app.use('/admin/wallet', adminWalletRouter);
 
 app.get('/', (_req, res) => {
   res.send('No errors here, probably.');

@@ -46,6 +46,33 @@ router.post('/webhook', async (req, res) => {
 
             console.log("Received payment for Link ID:", paymongoLinkId);
 
+            // A) Check if this link corresponds to a Wallet Cash-In
+            const WalletTransaction = require('../../models/WalletTransaction');
+            const User = require('../../models/User');
+            const { sendToUser } = require('../../services/socket');
+
+            const walletTx = await WalletTransaction.findOne({ paymongoLinkId });
+            if (walletTx && walletTx.status === 'pending') {
+                walletTx.status = 'completed';
+                await walletTx.save();
+
+                const creditedUser = await User.findById(walletTx.userId);
+                if (creditedUser) {
+                    creditedUser.walletBalance = parseFloat(((creditedUser.walletBalance || 0) + walletTx.amount).toFixed(2));
+                    await creditedUser.save();
+
+                    console.log(`[Webhook] Successfully credited ₱${walletTx.amount} to user ${creditedUser._id}. New balance: ₱${creditedUser.walletBalance}`);
+
+                    // Real-time socket notification to passenger app
+                    sendToUser(creditedUser._id.toString(), 'wallet_updated', {
+                        newBalance: creditedUser.walletBalance,
+                        transaction: walletTx,
+                        message: `Successfully added ₱${walletTx.amount.toFixed(2)} to your wallet!`,
+                    });
+                }
+            }
+
+            // B) Legacy direct ride booking payment (if applicable)
             const ride = await Ride.findOne({ paymongoLinkId: paymongoLinkId });
             
             if (ride && ride.status === 'payment_pending') {
