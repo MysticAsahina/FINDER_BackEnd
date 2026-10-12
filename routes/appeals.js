@@ -256,14 +256,30 @@ router.post(["/my-appeal/messages", "/:id/messages"], authenticateAppealToken, a
     }
 
     let mediaUrl = clientMediaUrl || null;
-    let mediaType = clientMediaType || (mediaUrl ? "image" : null);
+    let mediaType = clientMediaType || null;
 
     if (imageBase64) {
       const uploadRes = await cloudinary.uploader.upload(imageBase64, {
         folder: "appeals",
+        resource_type: "auto",
       });
       mediaUrl = uploadRes.secure_url;
-      mediaType = "image";
+      mediaType = uploadRes.resource_type === "video" ? "video" : "image";
+    }
+
+    if (mediaUrl && !mediaType) {
+      const cleanUrl = mediaUrl.split("?")[0].toLowerCase();
+      if (
+        cleanUrl.includes("/video/upload/") ||
+        cleanUrl.endsWith(".mp4") ||
+        cleanUrl.endsWith(".mov") ||
+        cleanUrl.endsWith(".webm") ||
+        cleanUrl.endsWith(".m4v")
+      ) {
+        mediaType = "video";
+      } else {
+        mediaType = "image";
+      }
     }
 
     const newMsg = {
