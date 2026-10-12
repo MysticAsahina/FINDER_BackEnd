@@ -102,6 +102,15 @@ const deleteAccountLimiter = rateLimit({
   message: { message: "Too many delete account requests. Please try again later." },
 });
 
+// Profile Picture: max 15 updates per 15 minutes per IP/user
+const profilePictureLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many profile picture updates. Please try again in 15 minutes." },
+});
+
 // ---------------------------------------------------------------------------
 // Field validators
 // Each function returns an error message string if invalid, null if valid.
@@ -1081,7 +1090,7 @@ const handleProfilePictureUpdate = async (req, res) => {
   }
 };
 
-router.patch("/profile-picture", authenticate, handleProfilePictureUpdate);
-router.post("/profile-picture", authenticate, handleProfilePictureUpdate);
+router.patch("/profile-picture", authenticate, profilePictureLimiter, handleProfilePictureUpdate);
+router.post("/profile-picture", authenticate, profilePictureLimiter, handleProfilePictureUpdate);
 
 module.exports = router;
