@@ -219,14 +219,26 @@ router.get("/my-appeal", authenticateAppealToken, appealReadLimiter, async (req,
 });
 
 // ---------------------------------------------------------------------------
-// POST /appeals/:id/messages (Appellant sends a message in thread)
+// POST /appeals/:id/messages OR POST /appeals/my-appeal/messages
+// (Appellant sends a message in their appeal thread)
 // ---------------------------------------------------------------------------
-router.post("/:id/messages", authenticateAppealToken, appealSubmitLimiter, async (req, res) => {
+router.post(["/my-appeal/messages", "/:id/messages"], authenticateAppealToken, appealSubmitLimiter, async (req, res) => {
   try {
     const user = req.suspendedUser;
     const { body, imageBase64 } = req.body;
 
-    const appeal = await Appeal.findById(req.params.id);
+    let appeal;
+    if (req.params.id && req.params.id !== "my-appeal") {
+      // Validate ObjectId to prevent CastError
+      if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
+        return res.status(400).json({ message: "Invalid appeal ID format." });
+      }
+      appeal = await Appeal.findById(req.params.id);
+    } else {
+      // Resolve currently active/latest appeal for the authenticated suspended user
+      appeal = await Appeal.findOne({ userId: user._id }).sort({ createdAt: -1 });
+    }
+
     if (!appeal) {
       return res.status(404).json({ message: "Appeal not found." });
     }
