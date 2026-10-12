@@ -85,14 +85,19 @@ router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
   }
 
   // If a rideId is provided, validate it belongs to the user and is < 7 days old
+  let ride = null;
   if (rideId) {
-    const ride = await Ride.findById(rideId);
+    ride = await Ride.findById(rideId)
+      .populate("passengerId", "firstName lastName mobileNumber")
+      .populate("driverId", "firstName lastName mobileNumber");
     if (!ride) {
       return res.status(404).json({ message: "Ride not found." });
     }
     
     // Ensure the ride belongs to the user (either passenger or driver)
-    if (ride.passengerId.toString() !== req.user.id && ride.driverId?.toString() !== req.user.id) {
+    const passengerIdStr = ride.passengerId?._id ? ride.passengerId._id.toString() : ride.passengerId?.toString();
+    const driverIdStr = ride.driverId?._id ? ride.driverId._id.toString() : ride.driverId?.toString();
+    if (passengerIdStr !== req.user.id && driverIdStr !== req.user.id) {
       return res.status(403).json({ message: "You don't have permission to report this ride." });
     }
 
@@ -124,8 +129,61 @@ router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
 
   const ticket = await SupportTicket.create(ticketData);
 
-  // Populate user info so admin panel can display it immediately
+  // If a ride is associated, post an initial message containing the formatted trip details
+  if (ride) {
+    const refId = `Trip - ${ride._id.toString().slice(-6).toUpperCase()}`;
+    const rideDate = new Date(ride.tripCompletedAt || ride.createdAt).toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: true,
+    });
+    const fareFormatted = typeof ride.fare === "number" ? `₱${ride.fare.toFixed(2)}` : "–";
+    const payment = ride.paymentMethod ? ` (${ride.paymentMethod.toUpperCase()})` : "";
+    const distanceFormatted = ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : "–";
+    const durationMins = ride.actualDurationMins || ride.durationMins;
+    const durationFormatted = durationMins ? `${Math.round(durationMins * 10) / 10} mins` : "–";
+
+    const otherPartyLabel = req.user.role === "passenger" ? "Driver" : "Passenger";
+    const otherParty = req.user.role === "passenger" ? ride.driverId : ride.passengerId;
+    const otherPartyName = otherParty ? `${otherParty.firstName || ""} ${otherParty.lastName || ""}`.trim() : "Not assigned";
+
+    let tripSummary = `📌 [Reported Trip Details]\n` +
+      `• Reference: ${refId}\n` +
+      `• Date: ${rideDate}\n` +
+      `• Status: ${(ride.status || "completed").toUpperCase()}\n` +
+      `• Pickup: ${ride.pickup?.address || "N/A"}\n` +
+      `• Dropoff: ${ride.dropoff?.address || "N/A"}\n` +
+      `• Fare: ${fareFormatted}${payment}\n` +
+      `• Distance & Duration: ${distanceFormatted} · ${durationFormatted}\n` +
+      `• ${otherPartyLabel}: ${otherPartyName || "N/A"}`;
+
+    if (ride.cancellationData?.reason) {
+      tripSummary += `\n• Cancel Reason: ${ride.cancellationData.reason}`;
+    }
+
+    await ChatMessage.create({
+      ticketId: ticket._id,
+      senderId: req.user.id,
+      senderRole: req.user.role,
+      body: tripSummary,
+    });
+  }
+
+  // Populate user and ride info so admin panel can display it immediately
   await ticket.populate("userId", "firstName lastName role");
+  if (rideId) {
+    await ticket.populate({
+      path: "rideId",
+      populate: [
+        { path: "passengerId", select: "firstName lastName mobileNumber" },
+        { path: "driverId", select: "firstName lastName mobileNumber" }
+      ]
+    });
+  }
   
   // Notify admins
   broadcastToAdmins("new_ticket", ticket);
@@ -148,6 +206,13 @@ router.get("/tickets", authenticate, async (req, res) => {
 
   const tickets = await SupportTicket.find(filter)
     .populate("userId", "firstName lastName role")
+    .populate({
+      path: "rideId",
+      populate: [
+        { path: "passengerId", select: "firstName lastName mobileNumber" },
+        { path: "driverId", select: "firstName lastName mobileNumber" }
+      ]
+    })
     .sort({ updatedAt: -1 });
 
   return res.status(200).json({ tickets });
@@ -160,14 +225,23 @@ router.get("/tickets", authenticate, async (req, res) => {
 // Fetch message history for a specific ticket
 router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
   try {
-  const ticket = await SupportTicket.findById(req.params.ticketId);
+  const ticket = await SupportTicket.findById(req.params.ticketId)
+    .populate("userId", "firstName lastName role")
+    .populate({
+      path: "rideId",
+      populate: [
+        { path: "passengerId", select: "firstName lastName mobileNumber" },
+        { path: "driverId", select: "firstName lastName mobileNumber" }
+      ]
+    });
 
   if (!ticket) {
     return res.status(404).json({ message: "Ticket not found." });
   }
 
   // Non-admin users can only view their own tickets
-  if (req.user.role !== "admin" && ticket.userId.toString() !== req.user.id) {
+  const ticketOwnerId = ticket.userId?._id ? ticket.userId._id.toString() : ticket.userId?.toString();
+  if (req.user.role !== "admin" && ticketOwnerId !== req.user.id) {
     return res.status(403).json({ message: "Access denied." });
   }
 
@@ -180,7 +254,7 @@ router.get("/tickets/:ticketId/messages", authenticate, async (req, res) => {
     await ticket.save();
   }
 
-  return res.status(200).json({ messages, status: ticket.status });
+  return res.status(200).json({ messages, status: ticket.status, ticket });
   } catch (error) {
     console.error("[support/get-messages]", error);
     return res.status(500).json({ message: "Server error" });
@@ -290,24 +364,12 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
 // Resolve a ticket
 router.patch("/tickets/:ticketId/resolve", authenticate, async (req, res) => {
   try {
-
-
-
-
   const ticket = await SupportTicket.findById(req.params.ticketId);
 
-
-
-
-
-
-
-  if (!ticket) return res.status(404).json({ message: "Ticket not found." }); if (req.user.role !== "admin" && ticket.userId.toString() !== req.user.id) {
+  if (!ticket) return res.status(404).json({ message: "Ticket not found." });
+  
+  if (req.user.role !== "admin" && ticket.userId.toString() !== req.user.id) {
     return res.status(403).json({ message: "You can only resolve your own tickets." });
-  }
-
-  if (false) {
-    return res.status(404).json({ message: "Ticket not found." });
   }
 
   if (ticket.status === "resolved") {
