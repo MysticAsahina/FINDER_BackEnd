@@ -13,7 +13,7 @@ const appealMessageSchema = new mongoose.Schema(
     },
     body: {
       type: String,
-      required: true,
+      default: "",
     },
     mediaUrl: {
       type: String,

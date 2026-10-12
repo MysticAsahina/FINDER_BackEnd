@@ -225,7 +225,7 @@ router.get("/my-appeal", authenticateAppealToken, appealReadLimiter, async (req,
 router.post(["/my-appeal/messages", "/:id/messages"], authenticateAppealToken, appealSubmitLimiter, async (req, res) => {
   try {
     const user = req.suspendedUser;
-    const { body, imageBase64 } = req.body;
+    const { body, imageBase64, mediaUrl: clientMediaUrl, mediaType: clientMediaType } = req.body;
 
     let appeal;
     if (req.params.id && req.params.id !== "my-appeal") {
@@ -251,24 +251,27 @@ router.post(["/my-appeal/messages", "/:id/messages"], authenticateAppealToken, a
       return res.status(400).json({ message: "Cannot reply to an appeal that has already been resolved." });
     }
 
-    if (!body || !body.trim()) {
-      return res.status(400).json({ message: "Message body is required." });
+    if ((!body || !body.trim()) && !imageBase64 && !clientMediaUrl) {
+      return res.status(400).json({ message: "Message body or media attachment is required." });
     }
 
-    let mediaUrl = null;
+    let mediaUrl = clientMediaUrl || null;
+    let mediaType = clientMediaType || (mediaUrl ? "image" : null);
+
     if (imageBase64) {
       const uploadRes = await cloudinary.uploader.upload(imageBase64, {
         folder: "appeals",
       });
       mediaUrl = uploadRes.secure_url;
+      mediaType = "image";
     }
 
     const newMsg = {
       senderRole: "user",
       senderName: `${user.firstName} ${user.lastName}`,
-      body: body.trim(),
+      body: body ? body.trim() : "",
       mediaUrl,
-      mediaType: mediaUrl ? "image" : null,
+      mediaType,
       createdAt: new Date(),
     };
 

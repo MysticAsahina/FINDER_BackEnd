@@ -1,13 +1,57 @@
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
 const cloudinary = require("cloudinary").v2;
 const cron = require("node-cron");
 const { authenticate } = require("../middleware/auth");
+const User = require("../models/User");
 const SupportTicket = require("../models/SupportTicket");
 const ChatMessage = require("../models/ChatMessage");
 const Ride = require("../models/Ride");
 
 const router = express.Router();
+
+/**
+ * Middleware: Allow either active authenticated users OR suspended users with a valid appeal session token
+ */
+async function authenticateOrAppealToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided." });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  // Try standard access token first
+  try {
+    const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
+    if (!decoded.pending) {
+      const user = await User.findById(decoded.id).select("tokenVersion isSuspended");
+      if (user && !user.isSuspended) {
+        req.user = decoded;
+        return next();
+      }
+    }
+  } catch (err) {
+    // Fallback to check appeal token
+  }
+
+  // Try appeal session token (signed with PENDING_SECRET)
+  try {
+    const decodedAppeal = jwt.verify(token, process.env.PENDING_SECRET);
+    if (decodedAppeal.isAppealSession) {
+      const user = await User.findById(decodedAppeal.id).select("isSuspended");
+      if (user && user.isSuspended) {
+        req.user = { id: user._id.toString(), isAppeal: true };
+        return next();
+      }
+    }
+  } catch (err) {
+    // Both failed
+  }
+
+  return res.status(401).json({ message: "Invalid or expired authorization token." });
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,7 +85,7 @@ const signatureLimiter = rateLimit({
 // ---------------------------------------------------------------------------
 router.post(
   "/cloudinary-signature",
-  authenticate,
+  authenticateOrAppealToken,
   signatureLimiter,
   async (req, res) => {
     try {
