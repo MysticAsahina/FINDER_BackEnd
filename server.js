@@ -39,6 +39,8 @@ const adminAppealsRouter            = require('./routes/admin/appeals');
 const walletRouter                  = require('./routes/wallet');
 const adminWalletRouter             = require('./routes/admin/wallet');
 
+const publicRouter                = require('./routes/public');
+
 const http = require("http");
 const socketService = require("./services/socket");
 const { startIdleMonitor } = require("./services/idleMonitor");
@@ -52,7 +54,22 @@ const server = http.createServer(app);
 const port   = process.env.PORT;
 
 app.use(cors({
-  origin: ['https://finder-admin.mcreysc980.workers.dev', 'https://finderadmin.pages.dev'],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile React Native apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const allowed = [
+      'https://finder-admin.mcreysc980.workers.dev',
+      'https://finderadmin.pages.dev',
+      'https://finder-public.pages.dev',
+    ];
+
+    if (allowed.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
 
@@ -101,6 +118,7 @@ app.use('/appeals', appealsRouter);
 app.use('/admin/appeals', adminAppealsRouter);
 app.use('/wallet', walletRouter);
 app.use('/admin/wallet', adminWalletRouter);
+app.use('/public', publicRouter);
 
 app.get('/', (_req, res) => {
   res.send('No errors here, probably.');
