@@ -10,22 +10,6 @@ const { validateEmailFormat, validateEmailLength, validatePasswordLength, valida
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
-// Field validators
-// Each function returns an error message string if invalid, null if valid.
-
-// ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-// ---------------------------------------------------------------------------
 // Rate limiters
 // ---------------------------------------------------------------------------
 
@@ -160,7 +144,8 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('adm
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
         email: updatedUser.email,
-        mobileNumber: updatedUser.mobileNumber
+        mobileNumber: updatedUser.mobileNumber,
+        profilePicture: updatedUser.profilePicture || null,
       }
     });
   } catch (err) {

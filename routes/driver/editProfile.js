@@ -219,6 +219,7 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole("dri
       lastName: user.lastName,
       mobileNumber: user.mobileNumber,
       email: user.email ?? null,
+      profilePicture: user.profilePicture || user.driverDetails?.faceImg || null,
       hasMpin: !!user.driverDetails?.mpin,
     };
 

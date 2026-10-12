@@ -30,7 +30,7 @@ router.get("/current", authenticate, requireRole("passenger"), async (req, res) 
     const ride = await Ride.findOne({
       passengerId: req.user.id,
       status: { $nin: ["completed", "cancelled"] },
-    }).populate("driverId", "firstName lastName mobileNumber driverDetails");
+    }).populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails");
     
     res.json({ ride });
   } catch (err) {
@@ -47,7 +47,7 @@ router.get("/history", authenticate, requireRole("passenger"), async (req, res) 
       status: { $in: ["completed", "cancelled"] },
     })
       .sort({ createdAt: -1 })
-      .populate("driverId", "firstName lastName mobileNumber driverDetails");
+      .populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails");
     
     res.json({ rides });
   } catch (err) {

@@ -68,6 +68,7 @@ router.get("/", authenticate, requireRole("admin"), async (req, res) => {
         vehicle: `${details.motorcycleBrand || "Unknown"} • ${details.plateNumber || "N/A"}`,
         motorcycleBrand: details.motorcycleBrand,
         plateNumber: details.plateNumber,
+        profilePicture: d.profilePicture || details.faceImg || null,
         tricycleImgFront: details.tricycleImgFront,
         licenseImgFront: details.licenseImgFront,
       };

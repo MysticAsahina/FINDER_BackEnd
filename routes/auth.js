@@ -2,6 +2,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
+const cloudinary = require("cloudinary").v2;
 const User = require("../models/User");
 const Appeal = require("../models/Appeal");
 const ActiveDriver = require("../models/ActiveDriver");
@@ -10,6 +11,36 @@ const { logAdminAction } = require("../utils/auditLogger");
 const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
 const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
 const { authenticate, requireRole } = require("../middleware/auth");
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+function buildUserPayload(user) {
+  const payload = {
+    id: user._id,
+    role: user.role,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    mobileNumber: user.mobileNumber,
+    email: user.email || null,
+    profilePicture: user.profilePicture || (user.role === "driver" ? user.driverDetails?.faceImg : null) || null,
+    emergencyContact: user.emergencyContact || null,
+  };
+
+  if (user.role === "passenger") {
+    payload.isDiscountVerified = user.isDiscountVerified;
+    payload.discountType = user.discountType;
+  }
+
+  if (user.role === "driver") {
+    payload.hasMpin = !!user.driverDetails?.mpin;
+  }
+
+  return payload;
+}
 
 const router = express.Router();
 
@@ -519,22 +550,7 @@ router.post("/verify-otp", otpSubmitLimiter, async (req, res) => {
       logAdminAction(req, user._id, user.firstName + " " + user.lastName, "LOGIN_SUCCESS", "Admin logged in successfully");
     }
 
-    const userPayload = {
-      id: user._id,
-      role: user.role,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      mobileNumber: user.mobileNumber,
-      email: user.email || null,
-      emergencyContact: user.emergencyContact || null,
-    };
-
-    if (user.role === "passenger") {
-        userPayload.isDiscountVerified = user.isDiscountVerified;
-        userPayload.discountType = user.discountType;
-    }
-
-    if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
+    const userPayload = buildUserPayload(user);
 
     return res.status(200).json({ accessToken, refreshToken, user: userPayload });
 
@@ -637,23 +653,7 @@ router.post("/refresh", async (req, res) => {
 
     user.refreshToken = hashToken(newRefreshToken);
     await user.save();
-
-    const userPayload = {
-        id: user._id,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        mobileNumber: user.mobileNumber,
-        email: user.email || null,
-        emergencyContact: user.emergencyContact || null,
-    };
-
-    if (user.role === "passenger") {
-        userPayload.isDiscountVerified = user.isDiscountVerified;
-        userPayload.discountType = user.discountType;
-    }
-
-    if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
+    const userPayload = buildUserPayload(user);
 
     return res.json({ accessToken, refreshToken: newRefreshToken, user: userPayload });
 
@@ -672,22 +672,7 @@ router.get("/me", authenticate, async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const userPayload = {
-        id: user._id,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        mobileNumber: user.mobileNumber,
-        email: user.email || null,
-        emergencyContact: user.emergencyContact || null,
-    };
-
-    if (user.role === "passenger") {
-        userPayload.isDiscountVerified = user.isDiscountVerified;
-        userPayload.discountType = user.discountType;
-    }
-
-    if (user.role === "driver") userPayload.hasMpin = !!user.driverDetails?.mpin;
+    const userPayload = buildUserPayload(user);
 
     res.json({ user: userPayload });
   } catch (err) {
@@ -997,5 +982,49 @@ router.delete("/delete-account", authenticate, requireRole("passenger", "driver"
     return res.status(500).json({ message: "Server error while deleting account." });
   }
 });
+
+// ---------------------------------------------------------------------------
+// PATCH /auth/profile-picture & POST /auth/profile-picture
+// Updates or removes the authenticated user's profile picture.
+// ---------------------------------------------------------------------------
+const handleProfilePictureUpdate = async (req, res) => {
+  try {
+    const { profilePicture } = req.body;
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    if (!profilePicture) {
+      user.profilePicture = null;
+    } else if (typeof profilePicture === "string" && profilePicture.startsWith("data:image/")) {
+      const uploadRes = await cloudinary.uploader.upload(profilePicture, {
+        folder: "profile-pictures",
+        transformation: [
+          { width: 500, height: 500, crop: "fill", gravity: "face" }
+        ],
+      });
+      user.profilePicture = uploadRes.secure_url;
+    } else if (typeof profilePicture === "string" && (profilePicture.startsWith("http://") || profilePicture.startsWith("https://"))) {
+      user.profilePicture = profilePicture;
+    } else {
+      return res.status(400).json({ message: "Invalid image format." });
+    }
+
+    await user.save();
+
+    const userPayload = buildUserPayload(user);
+
+    return res.status(200).json({
+      message: user.profilePicture ? "Profile picture updated successfully." : "Profile picture removed successfully.",
+      profilePicture: userPayload.profilePicture,
+      user: userPayload,
+    });
+  } catch (err) {
+    console.error("[auth/profile-picture]", err);
+    return res.status(500).json({ message: "Failed to update profile picture. Please try again." });
+  }
+};
+
+router.patch("/profile-picture", authenticate, handleProfilePictureUpdate);
+router.post("/profile-picture", authenticate, handleProfilePictureUpdate);
 
 module.exports = router;

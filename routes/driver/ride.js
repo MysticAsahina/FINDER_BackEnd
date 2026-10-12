@@ -17,7 +17,7 @@ router.get("/current", authenticate, requireRole("driver"), async (req, res) => 
         { driverId: req.user.id, status: { $nin: ["completed", "cancelled"] } },
         { currentCandidateDriverId: req.user.id, status: "pending" }
       ]
-    }).populate("passengerId", "firstName lastName mobileNumber");
+    }).populate("passengerId", "firstName lastName mobileNumber profilePicture");
     
     res.json({ ride });
   } catch (err) {
@@ -34,7 +34,7 @@ router.get("/history", authenticate, requireRole("driver"), async (req, res) => 
       status: { $in: ["completed", "cancelled"] },
     })
       .sort({ createdAt: -1 })
-      .populate("passengerId", "firstName lastName mobileNumber");
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
     
     res.json({ rides });
   } catch (err) {
@@ -71,8 +71,8 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
 
     // Notify passenger
     const populatedRide = await Ride.findById(ride._id)
-      .populate("driverId", "firstName lastName mobileNumber driverDetails")
-      .populate("passengerId", "firstName lastName mobileNumber");
+      .populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails")
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
     broadcastToRide(ride._id, "ride_accepted", { ride: populatedRide });
 
     res.json({ message: "Ride accepted", ride: populatedRide });
