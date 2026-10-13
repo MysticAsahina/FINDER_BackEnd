@@ -288,8 +288,22 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
     });
 
     if (status === "completed") {
-      // Free up driver
-      await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
+      // Driver is still viewing the dropoff summary on their screen.
+      // Keep isBusy: true so rideMatcher does not dispatch new rides while they review earnings.
+      // Add a 60-second safety timeout in case the app is killed or loses connectivity.
+      setTimeout(async () => {
+        try {
+          const ongoing = await Ride.findOne({
+            driverId: req.user.id,
+            status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+          });
+          if (!ongoing) {
+            await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
+          }
+        } catch (timeoutErr) {
+          console.error("[driver-summary-safety-timeout-err]", timeoutErr);
+        }
+      }, 60000);
 
       // Atomic Wallet Settlement (if paymentMethod was 'wallet')
       if (ride.paymentMethod === "wallet") {
@@ -344,4 +358,45 @@ router.get("/earnings/daily", authenticate, requireRole("driver"), async (req, r
   }
 });
 
+// Dismiss trip summary and mark driver as available
+router.post("/:id/dismiss-summary", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    // Check if there are any other ongoing active rides
+    const ongoingRide = await Ride.findOne({
+      driverId,
+      status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+    });
+
+    if (!ongoingRide) {
+      await ActiveDriver.findOneAndUpdate({ driverId }, { isBusy: false });
+    }
+
+    res.json({ message: "Summary dismissed. Driver is now available for new rides." });
+  } catch (err) {
+    console.error("[driver-dismiss-summary]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/dismiss-summary", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const ongoingRide = await Ride.findOne({
+      driverId,
+      status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+    });
+
+    if (!ongoingRide) {
+      await ActiveDriver.findOneAndUpdate({ driverId }, { isBusy: false });
+    }
+
+    res.json({ message: "Summary dismissed. Driver is now available for new rides." });
+  } catch (err) {
+    console.error("[driver-dismiss-summary-general]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
+
