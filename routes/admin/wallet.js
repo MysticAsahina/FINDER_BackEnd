@@ -53,14 +53,25 @@ router.get('/summary', authenticate, requireRole('admin'), async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/transactions', authenticate, requireRole('admin'), async (req, res) => {
   try {
-    const { type, role, status, date, search, page, limit } = req.query;
+    const { type, role, status, date, search, page, limit, month, year } = req.query;
     const filter = {};
 
     if (type && type !== 'ALL') filter.type = type;
     if (role && role !== 'ALL') filter.userRole = role;
     if (status && status !== 'ALL') filter.status = status;
 
-    if (date && date !== 'ALL') {
+    if (month && year) {
+      const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+      ];
+      const monthIndex = monthNames.indexOf(month);
+      if (monthIndex !== -1 && !isNaN(parseInt(year, 10))) {
+        const start = new Date(parseInt(year, 10), monthIndex, 1);
+        const end = new Date(parseInt(year, 10), monthIndex + 1, 1);
+        filter.createdAt = { $gte: start, $lt: end };
+      }
+    } else if (date && date !== 'ALL') {
       const now = new Date();
       if (date === 'TODAY') {
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
