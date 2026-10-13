@@ -64,6 +64,8 @@ router.get(
       const [
         totalDrivers,
         newDriversThisWeek,
+        totalPassengers,
+        newPassengersThisWeek,
         pendingApplications,
         todayRidesAgg,
         yesterdayRidesAgg,
@@ -81,7 +83,16 @@ router.get(
           createdAt: { $gte: weekStart },
         }),
 
-        // 3. Pending driver applications
+        // 3. Total registered passengers
+        User.countDocuments({ role: 'passenger' }),
+
+        // 4. New passengers registered this week
+        User.countDocuments({
+          role: 'passenger',
+          createdAt: { $gte: weekStart },
+        }),
+
+        // 5. Pending driver applications
         DriverApplication.countDocuments({ status: 'pending' }),
 
         // 4. Today's completed + cancelled rides
@@ -191,6 +202,9 @@ router.get(
         stats: {
           totalDrivers,
           newDriversThisWeek,
+          registeredPassengers: totalPassengers,
+          totalPassengers,
+          newPassengersThisWeek,
           pendingApplications,
           completedTripsToday:  todayCompleted,
           completionRateToday:  completionRate,
