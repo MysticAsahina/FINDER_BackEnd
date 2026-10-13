@@ -2,6 +2,8 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
+const BookingBuffer = require("../../models/BookingBuffer");
+const bookingDistributor = require("../../services/bookingDistributor");
 const { broadcastToRide, sendToUser } = require("../../services/socket");
 const { matchRide } = require("../../services/rideMatcher");
 const { getDistanceInMeters } = require("../../utils/geo");
@@ -46,6 +48,20 @@ router.get("/history", authenticate, requireRole("driver"), async (req, res) => 
 // Accept a ride
 router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    // Check if there is an active buffer for this ride
+    const buffer = await BookingBuffer.findOne({
+      rideId: req.params.id,
+      status: "distributing",
+      "currentCandidate.driverId": req.user.id,
+    });
+    if (buffer) {
+      const result = await bookingDistributor.acceptOffer(buffer._id, req.user.id);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      return res.json({ message: "Ride accepted", ride: result.ride });
+    }
+
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ message: "Ride not found." });
 
@@ -85,6 +101,16 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
 // Decline a ride
 router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    const buffer = await BookingBuffer.findOne({
+      rideId: req.params.id,
+      status: "distributing",
+      "currentCandidate.driverId": req.user.id,
+    });
+    if (buffer) {
+      await bookingDistributor.declineOffer(buffer._id, req.user.id);
+      return res.json({ message: "Ride declined" });
+    }
+
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ message: "Ride not found." });
 

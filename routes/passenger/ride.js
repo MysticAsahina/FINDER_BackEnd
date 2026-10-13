@@ -295,9 +295,13 @@ router.post("/:id/cancel", authenticate, requireRole("passenger"), async (req, r
 
     broadcastToRide(ride._id, "ride_cancelled", { reason: reason || "Cancelled by passenger" });
 
+    // Cancel buffer if distributing
+    const bookingDistributor = require("../../services/bookingDistributor");
+    await bookingDistributor.cancelBuffer(ride._id);
+
     // If driver was assigned, free them up
     if (ride.driverId) {
-      await ActiveDriver.findOneAndUpdate({ driverId: ride.driverId }, { isBusy: false });
+      await ActiveDriver.findOneAndUpdate({ driverId: ride.driverId }, { isBusy: false, reservedUntil: null, reservedBufferId: null });
     }
 
     res.json({ message: "Ride cancelled successfully", ride });

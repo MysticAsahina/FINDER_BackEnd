@@ -19,6 +19,7 @@ const supportRouter          = require('./routes/support');
 const driverStatusRouter     = require('./routes/driver/status');
 const passengerRideRouter    = require('./routes/passenger/ride');
 const driverRideRouter       = require('./routes/driver/ride');
+const driverDispatchRouter   = require('./routes/driver/dispatch');
 const passengerChatRouter    = require('./routes/passenger/chat');
 const driverChatRouter       = require('./routes/driver/chat');
 const emergencyContactRouter = require('./routes/emergencyContact');
@@ -102,6 +103,7 @@ app.use('/support', supportRouter);
 app.use('/driver/status', driverStatusRouter);
 app.use('/passenger/ride', passengerRideRouter);
 app.use('/driver/ride', driverRideRouter);
+app.use('/driver/dispatch', driverDispatchRouter);
 app.use('/passenger/ride', passengerChatRouter);
 app.use('/driver/ride', driverChatRouter);
 app.use('/emergency-contact', emergencyContactRouter);
@@ -167,6 +169,11 @@ mongoose.connect(process.env.MONGO_URI, {
 
     socketService.init(server);
     startIdleMonitor();
+
+    // Recover any active booking buffers from prior restart
+    const { recoverDanglingBuffers } = require("./services/bookingDistributor");
+    recoverDanglingBuffers();
+
     server.listen(port, () => {
       console.log(`Listening on port ${port}`);
     });

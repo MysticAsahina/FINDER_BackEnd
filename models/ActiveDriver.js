@@ -35,6 +35,16 @@ const activeDriverSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    reservedUntil: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    reservedBufferId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BookingBuffer",
+      default: null,
+    },
   },
   { timestamps: true }
 );
