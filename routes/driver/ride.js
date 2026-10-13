@@ -302,7 +302,11 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
       }
     }
 
-    res.json({ message: `Status updated to ${status}`, ride });
+    const populatedRide = await Ride.findById(ride._id)
+      .populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails")
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
+
+    res.json({ message: `Status updated to ${status}`, ride: populatedRide });
   } catch (err) {
     console.error("[driver-ride-status]", err);
     res.status(500).json({ message: "Server error" });
