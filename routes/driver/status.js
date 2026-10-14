@@ -2,9 +2,13 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const ActiveDriver = require("../../models/ActiveDriver");
 const Ride = require("../../models/Ride");
+const {
+  processDriverLocation,
+  getDriverQueueInfo,
+} = require("../../services/terminalQueue");
 const router = express.Router();
 
-// Get current status
+// Get current status and queue position
 router.get("/", authenticate, requireRole("driver"), async (req, res) => {
   try {
     let activeDriver = await ActiveDriver.findOne({ driverId: req.user.id });
@@ -21,9 +25,25 @@ router.get("/", authenticate, requireRole("driver"), async (req, res) => {
         await activeDriver.save();
       }
     }
-    res.json(activeDriver);
+
+    const queueInfo = await getDriverQueueInfo(req.user.id);
+    res.json({
+      ...activeDriver.toObject(),
+      queueInfo,
+    });
   } catch (err) {
     console.error("[driver-status-get]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Lightweight queue status poll
+router.get("/queue", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const queueInfo = await getDriverQueueInfo(req.user.id);
+    res.json(queueInfo);
+  } catch (err) {
+    console.error("[driver-status-queue-get]", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -54,17 +74,27 @@ router.post("/", authenticate, requireRole("driver"), async (req, res) => {
       }
     }
 
+    let coordinates = activeDriver.location?.coordinates || [0, 0];
     if (latitude !== undefined && longitude !== undefined) {
+      coordinates = [longitude, latitude];
       activeDriver.location = {
         type: "Point",
-        coordinates: [longitude, latitude],
+        coordinates,
       };
     }
+
+    // Process terminal queue entry, exit, grace period, or disconnect
+    await processDriverLocation(activeDriver, coordinates, activeDriver.isOnline);
 
     activeDriver.lastUpdated = Date.now();
     await activeDriver.save();
 
-    res.json(activeDriver);
+    const queueInfo = await getDriverQueueInfo(req.user.id);
+
+    res.json({
+      ...activeDriver.toObject(),
+      queueInfo,
+    });
   } catch (err) {
     console.error("[driver-status-update]", err);
     res.status(500).json({ message: "Server error" });

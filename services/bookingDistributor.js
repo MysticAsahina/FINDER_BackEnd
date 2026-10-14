@@ -3,6 +3,14 @@ const ActiveDriver = require("../models/ActiveDriver");
 const Ride = require("../models/Ride");
 const { sendToUser, broadcastToRide } = require("./socket");
 const { sendPushToUser } = require("./notification");
+const {
+  calculateDistanceMeters,
+  getMvgfciTerminal,
+  applyQueuePenalty,
+  GRACE_PERIOD_MS,
+  DEFAULT_MVGFCI_COORDS,
+  DEFAULT_CATCHMENT_RADIUS,
+} = require("./terminalQueue");
 
 const OFFER_TIMEOUT_MS = 25000; // 25 seconds
 const ACK_TIMEOUT_MS = 6000;    // 6 seconds fast-failover for unreachable devices
@@ -88,28 +96,93 @@ async function enqueueRide(rideId) {
       passengerDetails,
     };
 
-    // Query nearest available candidates (online, not busy, not reserved, not in ignoredDrivers)
+    // Query candidates: Check if pickup is within terminal catchment radius
     const now = new Date();
-    const availableDrivers = await ActiveDriver.find({
-      isOnline: true,
-      isBusy: false,
-      driverId: { $nin: ride.ignoredDrivers || [] },
-      $or: [
-        { reservedUntil: null },
-        { reservedUntil: { $lte: now } },
-      ],
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: ride.pickup.coordinates.coordinates,
-          },
-          $maxDistance: MAX_SEARCH_DISTANCE_METERS,
-        },
-      },
-    }).limit(MAX_CANDIDATES);
+    const terminal = await getMvgfciTerminal();
+    const terminalCoords = terminal.location?.coordinates || DEFAULT_MVGFCI_COORDS;
+    const catchmentRadius = terminal.catchmentRadiusMeters || DEFAULT_CATCHMENT_RADIUS;
+    const pickupCoords = ride.pickup.coordinates.coordinates;
+    const distToTerminal = calculateDistanceMeters(pickupCoords, terminalCoords);
 
-    const candidatePool = availableDrivers.map((d) => ({
+    let candidateDrivers = [];
+
+    if (distToTerminal <= catchmentRadius) {
+      console.log(
+        `[bookingDistributor] Pickup is within ${catchmentRadius}m catchment (${Math.round(distToTerminal)}m) of ${terminal.code}. Prioritizing TODA terminal queue.`
+      );
+
+      // Tier 1: Terminal queue drivers sorted by FIFO (enteredTerminalAt ASC)
+      const tier1Candidates = await ActiveDriver.find({
+        terminalId: terminal.code,
+        isOnline: true,
+        isBusy: false,
+        enteredTerminalAt: { $ne: null },
+        driverId: { $nin: ride.ignoredDrivers || [] },
+        $or: [
+          { reservedUntil: null },
+          { reservedUntil: { $lte: now } },
+        ],
+      }).sort({ enteredTerminalAt: 1 });
+
+      // Filter drivers whose grace period hasn't expired
+      const tier1Drivers = tier1Candidates.filter((d) => {
+        if (d.leftTerminalAt) {
+          const timeOutside = now.getTime() - new Date(d.leftTerminalAt).getTime();
+          if (timeOutside > GRACE_PERIOD_MS) return false;
+        }
+        return true;
+      }).slice(0, MAX_CANDIDATES);
+
+      const tier1DriverIds = tier1Drivers.map((d) => d.driverId);
+
+      // Tier 2: Outside / roaming drivers sorted by proximity to pickup
+      let tier2Drivers = [];
+      const remainingSlots = MAX_CANDIDATES - tier1Drivers.length;
+      if (remainingSlots > 0) {
+        tier2Drivers = await ActiveDriver.find({
+          isOnline: true,
+          isBusy: false,
+          driverId: { $nin: [...(ride.ignoredDrivers || []), ...tier1DriverIds] },
+          $or: [
+            { reservedUntil: null },
+            { reservedUntil: { $lte: now } },
+          ],
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: pickupCoords,
+              },
+              $maxDistance: MAX_SEARCH_DISTANCE_METERS,
+            },
+          },
+        }).limit(remainingSlots);
+      }
+
+      candidateDrivers = [...tier1Drivers, ...tier2Drivers];
+    } else {
+      // Standard proximity query when outside catchment
+      candidateDrivers = await ActiveDriver.find({
+        isOnline: true,
+        isBusy: false,
+        driverId: { $nin: ride.ignoredDrivers || [] },
+        $or: [
+          { reservedUntil: null },
+          { reservedUntil: { $lte: now } },
+        ],
+        location: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: pickupCoords,
+            },
+            $maxDistance: MAX_SEARCH_DISTANCE_METERS,
+          },
+        },
+      }).limit(MAX_CANDIDATES);
+    }
+
+    const candidatePool = candidateDrivers.map((d) => ({
       driverId: d.driverId,
       status: "pending",
     }));
@@ -370,6 +443,9 @@ async function distributeNext(bufferId) {
             currentCandidateDriverId: null,
           });
 
+          // Apply queue penalty if driver was in terminal queue (demote to back of line)
+          await applyQueuePenalty(candidate.driverId);
+
           sendToUser(candidate.driverId, "ride_request_expired", {
             rideId: freshB.rideId,
             bufferId: freshB._id,
@@ -447,10 +523,17 @@ async function acceptOffer(bufferId, driverId) {
       return { success: false, message: "Ride offer has already expired or been cancelled." };
     }
 
-    // Release driver reservation and set isBusy: true
+    // Release driver reservation, set isBusy: true, and clear queue status (driver is now on trip)
     await ActiveDriver.findOneAndUpdate(
       { driverId },
-      { isBusy: true, reservedUntil: null, reservedBufferId: null }
+      {
+        isBusy: true,
+        reservedUntil: null,
+        reservedBufferId: null,
+        enteredTerminalAt: null,
+        leftTerminalAt: null,
+        terminalId: null,
+      }
     );
 
     // Update Ride
@@ -520,6 +603,9 @@ async function declineOffer(bufferId, driverId) {
       $addToSet: { ignoredDrivers: driverId },
       currentCandidateDriverId: null,
     });
+
+    // Apply queue penalty if driver was in terminal queue (demote to back of line)
+    await applyQueuePenalty(driverId);
 
     console.log(`[bookingDistributor] Buffer ${bufferId} declined by driver ${driverId}. Next candidate...`);
 

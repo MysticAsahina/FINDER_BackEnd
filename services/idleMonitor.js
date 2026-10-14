@@ -24,6 +24,9 @@ async function checkIdleDrivers() {
       if (!activeRide) {
         // Driver is genuinely idle and not in a ride. Mark offline.
         driver.isOnline = false;
+        driver.terminalId = null;
+        driver.enteredTerminalAt = null;
+        driver.leftTerminalAt = null;
         await driver.save();
 
         // Emit socket event so their app updates UI and stops background tracking

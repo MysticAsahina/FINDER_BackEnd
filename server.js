@@ -170,6 +170,10 @@ mongoose.connect(process.env.MONGO_URI, {
     socketService.init(server);
     startIdleMonitor();
 
+    // Seed default MVGFCI terminal if needed
+    const Terminal = require("./models/Terminal");
+    Terminal.getMvgfciTerminal().catch(console.error);
+
     // Recover any active booking buffers from prior restart
     const { recoverDanglingBuffers } = require("./services/bookingDistributor");
     recoverDanglingBuffers();
