@@ -132,20 +132,57 @@ async function validateCancellation(ride, cancelledByRole, reason, forceStandard
 /**
  * Records a strike against a user and evaluates if they should be flagged.
  */
-async function recordStrikeAndEvaluate(userId, strikeType, rideId) {
+async function recordStrikeAndEvaluate(userId, strikeType, rideId, reportedBy = null) {
   if (!strikeType || !userId) return;
 
   const user = await User.findById(userId);
   if (!user) return;
 
+  // Prevent duplicate report strike for the same ride
+  if (strikeType === "reported_trip" && rideId) {
+    const alreadyReported = user.strikes.some(
+      s => s.type === "reported_trip" && s.rideId?.toString() === rideId.toString()
+    );
+    if (alreadyReported) {
+      console.log(`[strikes] Ride ${rideId} already recorded as reported against user ${userId}. Skipping duplicate.`);
+      return;
+    }
+  }
+
   user.strikes.push({
     type: strikeType,
     rideId,
+    reportedBy,
     createdAt: new Date()
   });
 
   // Evaluate flags based on rolling windows
   const now = new Date();
+
+  if (strikeType === "reported_trip") {
+    const reportStrikes = user.strikes.filter(s => s.type === "reported_trip");
+    if (reportStrikes.length >= 5 && !user.isFlagged) {
+      user.isFlagged = true;
+      user.flagReason = "Multiple Trip Reports (5 Reports)";
+      user.flaggedAt = now;
+      await user.save();
+      sendToUser(user._id, "account_warning", {
+        message: "Your account has been flagged due to multiple trip reports from users."
+      });
+      try {
+        const { broadcastToAdmins } = require("./socket");
+        broadcastToAdmins("user_flagged", {
+          userId: user._id,
+          name: `${user.firstName} ${user.lastName}`,
+          role: user.role,
+          reason: user.flagReason
+        });
+      } catch (err) {
+        console.error("[strikes] broadcastToAdmins error:", err);
+      }
+      return;
+    }
+  }
   
   if (strikeType === "frequent_cancellation") {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

@@ -182,8 +182,19 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
     strikes: [{
-      type: { type: String, enum: ['frequent_cancellation', 'unresponsive_passenger', 'unresponsive_driver'] },
+      type: {
+        type: String,
+        enum: [
+          'frequent_cancellation',
+          'unresponsive_passenger',
+          'unresponsive_driver',
+          'policy_violation',
+          'late_arrival',
+          'reported_trip'
+        ]
+      },
       rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' },
+      reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       createdAt: { type: Date, default: Date.now }
     }],
   },

@@ -59,6 +59,7 @@ const VALID_CATEGORIES = [
   "Fare Dispute",
   "Lost Item",
   "Driver Complaint",
+  "Passenger Complaint",
   "App Issue",
   "Account & Profile",
   "General Support",
@@ -171,6 +172,25 @@ router.post("/tickets", authenticate, ticketLimiter, async (req, res) => {
       senderRole: req.user.role,
       body: tripSummary,
     });
+
+    // Evaluate trip report against the other party (only the reported user is incremented)
+    const isReportSubject = [
+      "Driver Complaint",
+      "Passenger Complaint",
+      "Ride Report",
+      "Fare Dispute",
+    ].includes(trimmedSubject);
+
+    if (isReportSubject) {
+      const reporterRole = req.user.role;
+      const targetUser = reporterRole === "passenger" ? ride.driverId : ride.passengerId;
+      const targetUserId = targetUser?._id ? targetUser._id.toString() : targetUser?.toString();
+
+      if (targetUserId && targetUserId !== req.user.id.toString()) {
+        const { recordStrikeAndEvaluate } = require("../services/strikes");
+        await recordStrikeAndEvaluate(targetUserId, "reported_trip", ride._id, req.user.id);
+      }
+    }
   }
 
   // Populate user and ride info so admin panel can display it immediately

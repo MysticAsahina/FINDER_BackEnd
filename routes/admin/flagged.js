@@ -62,27 +62,28 @@ router.patch("/:id/action", authenticate, requireRole("admin"), actionLimiter, a
       user.flagReason = null;
       user.flaggedAt = null;
       user.restrictionEndDate = null;
+      // Reset reported_trip strikes when admin reviews and clears the flag
+      if (user.strikes && user.strikes.length > 0) {
+        user.strikes = user.strikes.filter(s => s.type !== "reported_trip");
+      }
       await user.save();
       return res.json({ message: "Flag cleared", user });
     } 
     
     if (action === "temp_suspend") {
-      const { durationDays } = req.body;
-      if (!durationDays || durationDays < 3 || durationDays > 30) {
-        return res.status(400).json({ message: "Invalid duration. Must be between 3 and 30 days." });
-      }
+      const durationDays = 3; // Fixed 3 days duration
       user.isSuspended = true;
       user.suspensionType = "temp_suspend";
       user.suspensionReason = reason || null;
       const endDate = new Date();
       endDate.setDate(endDate.getDate() + durationDays);
       user.suspensionEndDate = endDate;
-      user.isFlagged = false; // Usually clearing flag when moving to suspension
+      user.isFlagged = false; // Clear flag when moving to suspension
       user.refreshToken = null;
       user.pushTokens = [];
       await user.save();
-      sendToUser(user._id, "account_suspended", { message: `Your account has been temporarily suspended for ${durationDays} days.`, type: "temp_suspend" });
-      return res.json({ message: "Account temporarily suspended", user });
+      sendToUser(user._id, "account_suspended", { message: `Your account has been temporarily suspended for 3 days.`, type: "temp_suspend" });
+      return res.json({ message: "Account temporarily suspended for 3 days", user });
     }
 
     if (action === "suspend_resolved") {
