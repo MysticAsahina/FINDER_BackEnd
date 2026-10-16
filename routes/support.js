@@ -314,6 +314,12 @@ router.post("/tickets/:ticketId/messages", authenticate, messageLimiter, async (
     return res.status(403).json({ message: "Access denied." });
   }
 
+  // Check if ticket owner's account still exists
+  const ticketOwner = await User.findById(ticket.userId);
+  if (!ticketOwner) {
+    return res.status(400).json({ message: "This user has deleted their account. Further replies cannot be delivered." });
+  }
+
   const messageData = {
     ticketId: ticket._id,
     senderId: req.user.id,

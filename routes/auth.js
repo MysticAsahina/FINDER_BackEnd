@@ -7,6 +7,8 @@ const User = require("../models/User");
 const Appeal = require("../models/Appeal");
 const ActiveDriver = require("../models/ActiveDriver");
 const Ride = require("../models/Ride");
+const SupportTicket = require("../models/SupportTicket");
+const { broadcastTicketResolved, broadcastToAdmins } = require("../services/socket");
 const { logAdminAction } = require("../utils/auditLogger");
 const { sendSmsOtp: sendOtp, verifyOtp, createAndSendEmailOtp } = require("../utils/otpManager");
 const { validateEmailFormat, validateEmailLength, validatePasswordLength, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
@@ -1049,6 +1051,27 @@ router.delete("/delete-account", authenticate, requireRole("passenger", "driver"
 
     if (user.role === "driver") {
       await ActiveDriver.findOneAndDelete({ driverId: user._id });
+    }
+
+    // Auto-resolve any open support tickets for this user
+    try {
+      const openTickets = await SupportTicket.find({ userId: req.user.id, status: "open" });
+      if (openTickets.length > 0) {
+        await SupportTicket.updateMany(
+          { userId: req.user.id, status: "open" },
+          { status: "resolved", hasUnreadAdmin: false, updatedAt: new Date() }
+        );
+        for (const t of openTickets) {
+          broadcastTicketResolved(t._id.toString());
+          broadcastToAdmins("ticket_updated", {
+            ticketId: t._id.toString(),
+            updatedAt: new Date(),
+            status: "resolved"
+          });
+        }
+      }
+    } catch (ticketErr) {
+      console.error("[auth/delete-account] Failed to auto-resolve tickets:", ticketErr);
     }
 
     // Perform a hard delete as requested
