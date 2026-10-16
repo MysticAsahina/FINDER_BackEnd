@@ -101,4 +101,40 @@ router.post("/", authenticate, requireRole("driver"), async (req, res) => {
   }
 });
 
+// Dedicated location ping that updates coordinates without modifying isOnline
+router.post("/location-ping", authenticate, requireRole("driver"), async (req, res) => {
+  const { latitude, longitude } = req.body;
+  try {
+    let activeDriver = await ActiveDriver.findOne({ driverId: req.user.id });
+    if (!activeDriver) {
+      activeDriver = new ActiveDriver({ driverId: req.user.id, isOnline: false });
+    }
+
+    let coordinates = activeDriver.location?.coordinates || [0, 0];
+    if (latitude !== undefined && longitude !== undefined) {
+      coordinates = [longitude, latitude];
+      activeDriver.location = {
+        type: "Point",
+        coordinates,
+      };
+    }
+
+    // Only process terminal queue if driver is already online
+    if (activeDriver.isOnline) {
+      await processDriverLocation(activeDriver, coordinates, activeDriver.isOnline);
+    }
+
+    activeDriver.lastUpdated = Date.now();
+    await activeDriver.save();
+
+    res.json({
+      success: true,
+      isOnline: activeDriver.isOnline,
+    });
+  } catch (err) {
+    console.error("[driver-location-ping]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;

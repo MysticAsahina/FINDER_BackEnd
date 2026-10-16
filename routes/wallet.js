@@ -166,7 +166,7 @@ router.post('/cash-in/initiate', authenticate, requireRole('passenger'), async (
 // ---------------------------------------------------------------------------
 // POST /wallet/cash-out/request - Driver Cash Out via GCash (Zero-Fee Model)
 // ---------------------------------------------------------------------------
-router.post('/wallet/cash-out/request', authenticate, requireRole('driver'), async (req, res) => {
+router.post(['/cash-out/request', '/wallet/cash-out/request'], authenticate, requireRole('driver'), async (req, res) => {
   try {
     const { amount, accountName, mobileNumber } = req.body;
     const numAmount = parseFloat(amount);

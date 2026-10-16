@@ -5,7 +5,7 @@ const User = require("../../models/User");
 const Appeal = require("../../models/Appeal");
 const { logAdminAction } = require("../../utils/auditLogger");
 const { sendToUser, broadcastToAdmins } = require("../../services/socket");
-const { createAndSendEmailOtp, sendSms } = require("../../utils/otpManager");
+const { createAndSendEmailOtp, sendSms, verifyOtp } = require("../../utils/otpManager");
 
 const actionLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
@@ -225,7 +225,7 @@ router.post(["/request-reevaluate-otp", "/:id/request-reevaluate-otp"], authenti
       return res.status(400).json({ message: "Admin email address not found." });
     }
 
-    await createAndSendEmailOtp(adminUser._id, adminUser.email);
+    await createAndSendEmailOtp(req.user.id + "_adminReevaluateAppeal", adminUser.email);
 
     return res.status(200).json({
       success: true,
@@ -242,6 +242,16 @@ router.post(["/request-reevaluate-otp", "/:id/request-reevaluate-otp"], authenti
 // ---------------------------------------------------------------------------
 router.patch("/:id/reopen", authenticate, requireRole("admin"), actionLimiter, async (req, res) => {
   try {
+    const { code } = req.body;
+    if (!code || !code.trim()) {
+      return res.status(400).json({ message: "Two-factor verification OTP code is required." });
+    }
+
+    const otpResult = verifyOtp(req.user.id + "_adminReevaluateAppeal", code.trim());
+    if (!otpResult.valid) {
+      return res.status(400).json({ message: otpResult.message || "Invalid or expired OTP code." });
+    }
+
     const appeal = await Appeal.findById(req.params.id);
     if (!appeal) {
       return res.status(404).json({ message: "Appeal not found." });

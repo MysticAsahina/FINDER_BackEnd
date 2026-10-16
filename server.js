@@ -101,6 +101,7 @@ app.use('/admin/badges', adminBadgesRouter);
 
 app.use('/support', supportRouter);
 app.use('/driver/status', driverStatusRouter);
+app.use('/driver/location-ping', (req, res, next) => { req.url = '/location-ping' + (req.url === '/' ? '' : req.url); driverStatusRouter(req, res, next); });
 app.use('/passenger/ride', passengerRideRouter);
 app.use('/driver/ride', driverRideRouter);
 app.use('/driver/dispatch', driverDispatchRouter);
