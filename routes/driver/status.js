@@ -2,6 +2,7 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const ActiveDriver = require("../../models/ActiveDriver");
 const Ride = require("../../models/Ride");
+const { broadcastToRide } = require("../../services/socket");
 const {
   processDriverLocation,
   getDriverQueueInfo,
@@ -117,6 +118,21 @@ router.post("/location-ping", authenticate, requireRole("driver"), async (req, r
         type: "Point",
         coordinates,
       };
+
+      // Broadcast location to passenger if driver is on an active trip
+      try {
+        const ongoingRide = await Ride.findOne({
+          driverId: req.user.id,
+          status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+        });
+        if (ongoingRide) {
+          broadcastToRide(ongoingRide._id, "driver_location_update", {
+            location: { latitude, longitude }
+          });
+        }
+      } catch (e) {
+        console.error("[location-ping-broadcast-error]", e);
+      }
     }
 
     // Only process terminal queue if driver is already online

@@ -162,7 +162,10 @@ function init(server) {
     // Driver sends their location during an active trip
     socket.on("driver_location_update", ({ rideId, location, duration }) => {
       if (socket.user.role !== "driver") return;
-      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      if (!rideId) return;
+      if (!socket.rooms.has(rideId.toString())) {
+        socket.join(rideId.toString());
+      }
       // Broadcast this location update to anyone else in the ride room (the passenger)
       broadcastToRide(rideId, "driver_location_update", { location, duration });
     });

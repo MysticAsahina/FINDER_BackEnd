@@ -32,7 +32,18 @@ router.get("/current", authenticate, requireRole("passenger"), async (req, res) 
       status: { $nin: ["completed", "cancelled"] },
     }).populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails");
     
-    res.json({ ride });
+    let driverLocation = null;
+    if (ride && ride.driverId) {
+      const activeDriver = await ActiveDriver.findOne({ driverId: ride.driverId._id });
+      if (activeDriver && activeDriver.location?.coordinates && activeDriver.location.coordinates.length === 2) {
+        driverLocation = {
+          latitude: activeDriver.location.coordinates[1],
+          longitude: activeDriver.location.coordinates[0],
+        };
+      }
+    }
+
+    res.json({ ride, driverLocation });
   } catch (err) {
     console.error("[passenger-ride-current]", err);
     res.status(500).json({ message: "Server error" });
