@@ -948,15 +948,15 @@ router.post("/forgot-password/reset", forgotPasswordLimiter, async (req, res) =>
 });
 
 // ---------------------------------------------------------------------------
-// DELETE /auth/delete-account
+// POST /auth/delete-account/request-otp
 // ---------------------------------------------------------------------------
-router.delete("/delete-account", authenticate, requireRole("passenger", "driver"), deleteAccountLimiter, async (req, res) => {
+router.post("/delete-account/request-otp", authenticate, requireRole("passenger", "driver"), deleteAccountLimiter, async (req, res) => {
   const { confirmationText, password } = req.body;
 
   if (confirmationText !== "DELETE") {
     return res.status(400).json({ message: "You must type 'DELETE' to confirm account deletion." });
   }
-  
+
   if (!password) {
     return res.status(400).json({ message: "Password is required to delete your account." });
   }
@@ -973,7 +973,76 @@ router.delete("/delete-account", authenticate, requireRole("passenger", "driver"
       $or: [{ passengerId: req.user.id }, { driverId: req.user.id }],
       status: { $in: ['pending', 'driver_assigned', 'arrived_pickup', 'trip_started'] }
     });
-    
+
+    if (activeRide) {
+      return res.status(400).json({ message: "You cannot delete your account while involved in an active ride. Please complete or cancel the ride first." });
+    }
+
+    await sendOtp(req.user.id + "_deleteAccount", user.mobileNumber, { confirmationText: "DELETE" });
+
+    return res.status(200).json({
+      pendingOtp: true,
+      message: "An OTP has been sent to your registered mobile number.",
+    });
+  } catch (err) {
+    console.error("[auth/delete-account/request-otp]", err);
+    return res.status(500).json({ message: "Server error while processing delete account request." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/delete-account/resend-otp
+// ---------------------------------------------------------------------------
+router.post("/delete-account/resend-otp", authenticate, requireRole("passenger", "driver"), otpResendLimiter, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    await sendOtp(req.user.id + "_deleteAccount", user.mobileNumber, { confirmationText: "DELETE" });
+
+    return res.status(200).json({ message: "OTP has been resent to your registered mobile number." });
+  } catch (err) {
+    console.error("[auth/delete-account/resend-otp]", err);
+    return res.status(500).json({ message: "Failed to resend OTP." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /auth/delete-account
+// ---------------------------------------------------------------------------
+router.delete("/delete-account", authenticate, requireRole("passenger", "driver"), otpSubmitLimiter, async (req, res) => {
+  const { confirmationText, password, code } = req.body;
+
+  if (confirmationText !== "DELETE") {
+    return res.status(400).json({ message: "You must type 'DELETE' to confirm account deletion." });
+  }
+
+  if (!password) {
+    return res.status(400).json({ message: "Password is required to delete your account." });
+  }
+
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code.trim())) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) return res.status(401).json({ message: "Incorrect password." });
+
+    const otpResult = verifyOtp(req.user.id + "_deleteAccount", code.trim());
+    if (!otpResult.valid) {
+      return res.status(400).json({ message: otpResult.message || "Invalid or expired OTP." });
+    }
+
+    // Ensure they have no active rides
+    const activeRide = await Ride.findOne({
+      $or: [{ passengerId: req.user.id }, { driverId: req.user.id }],
+      status: { $in: ['pending', 'driver_assigned', 'arrived_pickup', 'trip_started'] }
+    });
+
     if (activeRide) {
       return res.status(400).json({ message: "You cannot delete your account while involved in an active ride. Please complete or cancel the ride first." });
     }
