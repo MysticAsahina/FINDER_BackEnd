@@ -88,19 +88,20 @@ router.get('/transactions', authenticate, requireRole('admin'), async (req, res)
 
     if (search && search.trim()) {
       const q = search.trim();
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const userMatches = await User.find({
         $or: [
-          { firstName: { $regex: q, $options: 'i' } },
-          { lastName: { $regex: q, $options: 'i' } },
-          { mobileNumber: { $regex: q, $options: 'i' } },
+          { firstName: { $regex: escaped, $options: 'i' } },
+          { lastName: { $regex: escaped, $options: 'i' } },
+          { mobileNumber: { $regex: escaped, $options: 'i' } },
         ],
       }).select('_id');
 
       const userIds = userMatches.map((u) => u._id);
 
       filter.$or = [
-        { referenceNumber: { $regex: q, $options: 'i' } },
-        { description: { $regex: q, $options: 'i' } },
+        { referenceNumber: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
         { userId: { $in: userIds } },
       ];
     }

@@ -39,9 +39,10 @@ router.get('/', authenticate, requireRole('admin'), async (req, res) => {
     }
 
     const User = require('../../models/User');
+    const ActiveDriver = require('../../models/ActiveDriver');
 
     // Run parallel queries: count total, get paginated, and aggregate stats
-    const [totalTrips, trips, statsAgg, supportMessagesCount, rideMessagesAgg, registeredPassengers, registeredDrivers, activeDrivers, inactiveDrivers] = await Promise.all([
+    const [totalTrips, trips, statsAgg, supportMessagesCount, rideMessagesAgg, registeredPassengers, registeredDrivers, activeDriversCount] = await Promise.all([
       Ride.countDocuments(query),
       Ride.find(query)
         .populate('driverId', 'firstName lastName')
@@ -71,9 +72,11 @@ router.get('/', authenticate, requireRole('admin'), async (req, res) => {
       ]),
       User.countDocuments({ role: 'passenger', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
       User.countDocuments({ role: 'driver', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
-      User.countDocuments({ role: 'driver', isOnline: true, ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
-      User.countDocuments({ role: 'driver', isOnline: false, ...(query.createdAt ? { createdAt: query.createdAt } : {}) })
+      ActiveDriver.countDocuments({ isOnline: true }),
     ]);
+
+    const activeDrivers = activeDriversCount;
+    const inactiveDrivers = Math.max(0, registeredDrivers - activeDrivers);
 
     // Format stats
     let totalCompleted = 0;

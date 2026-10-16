@@ -86,6 +86,15 @@ const forgotPasswordLimiter = rateLimit({
   message: { message: "Too many forgot password requests. Please try again later." },
 });
 
+// Forgot MPIN: max 5 requests per 15 minutes per IP
+const forgotMpinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many forgot MPIN requests. Please try again later." },
+});
+
 // MPIN submit: max 5 attempts per 15 minutes per IP
 const mpinLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -843,7 +852,7 @@ router.post("/forgot-password/verify-otp", otpSubmitLimiter, async (req, res) =>
 // ---------------------------------------------------------------------------
 // POST /auth/forgot-mpin
 // ---------------------------------------------------------------------------
-router.post("/forgot-mpin", async (req, res) => {
+router.post("/forgot-mpin", forgotMpinLimiter, async (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     return res.status(401).json({ message: "No token provided." });

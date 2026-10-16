@@ -23,7 +23,12 @@ const auditLogSchema = new mongoose.Schema(
         "DRIVER_REJECTED",
         "TICKET_RESOLVED",
         "PROFILE_EDITED",
-        "UPDATE_FARE_SETTINGS"
+        "UPDATE_FARE_SETTINGS",
+        "CONFIG_UPDATED",
+        "SUSPENSION_LIFTED",
+        "APPEAL_DENIED",
+        "APPEAL_REOPENED",
+        "PASSWORD_CHANGED"
       ],
     },
     details: {
