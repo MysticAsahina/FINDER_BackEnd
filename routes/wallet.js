@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const User = require('../models/User');
 const WalletTransaction = require('../models/WalletTransaction');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { getIO } = require('../services/socket');
+const { getIO, sendToUser } = require('../services/socket');
 
 const router = express.Router();
 
@@ -239,6 +239,13 @@ router.post(['/cash-out/request', '/wallet/cash-out/request'], authenticate, req
     });
 
     await transaction.save();
+
+    // Real-time socket notification to driver app
+    sendToUser(driver._id.toString(), 'wallet_updated', {
+      newBalance: driver.walletBalance,
+      transaction,
+      message: `Successfully cashed out ₱${numAmount.toFixed(2)} to GCash (${mobileNumber.trim()}).`,
+    });
 
     res.json({
       message: `Successfully cashed out ₱${numAmount.toFixed(2)} to GCash (${mobileNumber.trim()}).`,
