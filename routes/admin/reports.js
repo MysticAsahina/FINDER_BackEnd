@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const Ride = require('../../models/Ride');
+const { authenticate, requireRole } = require('../../middleware/auth');
 
 // GET /admin/reports
-router.get('/', async (req, res) => {
+router.get('/', authenticate, requireRole('admin'), async (req, res) => {
   try {
     const { month, year, page = 1, limit = 10 } = req.query;
 
@@ -37,8 +38,11 @@ router.get('/', async (req, res) => {
       }
     }
 
+    const User = require('../../models/User');
+    const ActiveDriver = require('../../models/ActiveDriver');
+
     // Run parallel queries: count total, get paginated, and aggregate stats
-    const [totalTrips, trips, statsAgg] = await Promise.all([
+    const [totalTrips, trips, statsAgg, supportMessagesCount, rideMessagesAgg, registeredPassengers, registeredDrivers, activeDriversCount] = await Promise.all([
       Ride.countDocuments(query),
       Ride.find(query)
         .populate('driverId', 'firstName lastName')
@@ -59,19 +63,53 @@ router.get('/', async (req, res) => {
             }
           }
         }
-      ])
+      ]),
+      require('../../models/ChatMessage').countDocuments(query.createdAt ? { createdAt: query.createdAt } : {}),
+      Ride.aggregate([
+        { $match: query.createdAt ? { createdAt: query.createdAt } : {} },
+        { $project: { numMessages: { $size: { $ifNull: ["$chatMessages", []] } } } },
+        { $group: { _id: null, total: { $sum: "$numMessages" } } }
+      ]),
+      User.countDocuments({ role: 'passenger', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
+      User.countDocuments({ role: 'driver', ...(query.createdAt ? { createdAt: query.createdAt } : {}) }),
+      ActiveDriver.countDocuments({ isOnline: true }),
     ]);
+
+    const activeDrivers = activeDriversCount;
+    const inactiveDrivers = Math.max(0, registeredDrivers - activeDrivers);
 
     // Format stats
     let totalCompleted = 0;
+    let totalCancelled = 0;
     let totalCount = 0;
     
     if (statsAgg.length > 0) {
       totalCompleted = statsAgg[0].totalCompleted;
+      totalCancelled = statsAgg[0].totalCancelled;
       totalCount = statsAgg[0].totalCompleted + statsAgg[0].totalCancelled;
     }
 
     const completedRate = totalCount > 0 ? ((totalCompleted / totalCount) * 100).toFixed(1) : 0;
+
+    // Calculate Average Daily Trips
+    let daysInMonth = 30; // default fallback
+    if (month && year) {
+      const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const monthIndex = monthNames.indexOf(month);
+      if (monthIndex !== -1 && !isNaN(parseInt(year))) {
+        daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      }
+    } else {
+      // If no month provided, use current month's days
+      const now = new Date();
+      daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    }
+    
+    const averageDailyTrips = totalCount > 0 ? (totalCount / daysInMonth).toFixed(1) : 0;
+
+    // Calculate Amount of Messages
+    const rideMessagesCount = rideMessagesAgg.length > 0 ? rideMessagesAgg[0].total : 0;
+    const totalMessages = supportMessagesCount + rideMessagesCount;
 
     res.json({
       success: true,
@@ -85,7 +123,14 @@ router.get('/', async (req, res) => {
       stats: {
         totalTrips: totalCount,
         completedTrips: totalCompleted,
-        completedRate: parseFloat(completedRate)
+        cancelledTrips: totalCancelled,
+        completedRate: parseFloat(completedRate),
+        averageDailyTrips: parseFloat(averageDailyTrips),
+        totalMessages: totalMessages,
+        registeredPassengers,
+        registeredDrivers,
+        activeDrivers,
+        inactiveDrivers
       }
     });
 

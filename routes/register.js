@@ -3,16 +3,10 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const User = require("../models/User");
+const { validateName, validateMobileFormat, validatePasswordPolicy } = require('../utils/validators');
+const { sendSmsOtp, verifyOtp } = require("../utils/otpManager");
 
 const router = express.Router();
-
-const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-
-// ---------------------------------------------------------------------------
-// OTP store — separate from the login OTP store in auth.js
-// Keyed by mobileNumber (string). Each entry: { code, expiresAt, attempts }
-// ---------------------------------------------------------------------------
-const regOtpStore = new Map();
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -45,37 +39,6 @@ const completeLimiter = rateLimit({
   message: { message: "Too many requests. Please try again later." },
 });
 
-// ---------------------------------------------------------------------------
-// Field validators
-// ---------------------------------------------------------------------------
-
-function validateMobileFormat(mobileNumber) {
-  // Stored format: 09XXXXXXXXX (11 digits)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
-
-function validatePasswordLength(password) {
-  if (password.length < 8) return "Password must be at least 8 characters.";
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
-
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function generateOtp() {
-  return String(crypto.randomInt(100000, 999999));
-}
-
 /**
  * Signs a registration token with a stage field.
  * stage 'otp'      — can only call /register/verify-otp
@@ -89,62 +52,6 @@ function signRegistrationToken(mobileNumber, stage) {
   );
 }
 
-// Converts number to E164 format, used for OTP
-function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
-}
-
-async function sendOtp(mobileNumber) {
-  const code = generateOtp();
-  const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  const recipient = toE164(mobileNumber);
-
-  const apiUsername = process.env.SMS_GATE_USERNAME;
-  const apiPassword = process.env.SMS_GATE_PASSWORD;
-
-  /* Temporary remove due to lack of load
-  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phoneNumbers: [recipient],
-      textMessage: { text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.` },
-    }),
-  });
-
-  console.log("Code: " + code);
-  const data = await response.json();
-
-  if (!response.ok) {
-    const err = new Error(data.message || "Failed to send OTP.");
-    err.smsStatus = response.status;
-    err.smsCode = data.code;
-    throw err;
-  } */
-
-  // Keyed by mobileNumber — one pending registration per number at a time
-  console.log("Code: " + code);
-  regOtpStore.set(mobileNumber, { code, expiresAt, attempts: 0 });
-}
-
-function verifyOtp(mobileNumber, submittedCode) {
-  const entry = regOtpStore.get(mobileNumber);
-
-  if (!entry) return false;
-  if (Date.now() > entry.expiresAt) { regOtpStore.delete(mobileNumber); return false; }
-
-  if (submittedCode !== entry.code) {
-    entry.attempts += 1;
-    if (entry.attempts >= 10) regOtpStore.delete(mobileNumber);
-    return false;
-  }
-
-  regOtpStore.delete(mobileNumber); // correct — consume it
-  return true;
-}
 
 // ---------------------------------------------------------------------------
 // POST /register/send-otp
@@ -169,7 +76,7 @@ router.post("/send-otp", sendOtpLimiter, async (req, res) => {
       return res.status(409).json({ message: "This number is already registered." });
     }
 
-    await sendOtp(mobileNumber);
+    await sendSmsOtp(mobileNumber, mobileNumber);
 
     return res.status(200).json({
       registrationToken: signRegistrationToken(mobileNumber, "otp"),
@@ -199,7 +106,7 @@ router.post("/resend-otp", sendOtpLimiter, async (req, res) => {
       return res.status(400).json({ message: "Invalid registration token." });
     }
 
-    await sendOtp(decoded.mobileNumber);
+    await sendSmsOtp(decoded.mobileNumber, decoded.mobileNumber);
 
     // Issue a fresh token to reset the 15-min window
     return res.status(200).json({
@@ -239,9 +146,9 @@ router.post("/verify-otp", verifyOtpLimiter, async (req, res) => {
       return res.status(400).json({ message: "Invalid registration token." });
     }
 
-    const isValid = verifyOtp(decoded.mobileNumber, code);
-    if (!isValid) {
-      return res.status(401).json({ message: "Invalid or expired OTP." });
+    const otpResult = verifyOtp(decoded.mobileNumber, code);
+    if (!otpResult.valid) {
+      return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
     }
 
     // Advance stage — this token is the only thing that can call /complete
@@ -298,7 +205,7 @@ router.post("/complete", completeLimiter, async (req, res) => {
     const lastNameError = validateName(lastName, "Last name");
     if (lastNameError) return res.status(400).json({ message: lastNameError });
 
-    const passwordError = validatePasswordLength(password);
+    const passwordError = validatePasswordPolicy(password);
     if (passwordError) return res.status(400).json({ message: passwordError });
 
     if (password !== confirmPassword.trim()) {

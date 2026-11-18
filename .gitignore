@@ -27,3 +27,7 @@ dist-ssr
 
 draft/
 *.txt
+
+# Specific files for development/testing/etc.
+
+checkPhilSmsBalance.js

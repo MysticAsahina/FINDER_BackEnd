@@ -56,44 +56,37 @@ router.get(
         status: { $in: ['completed', 'cancelled'] },
       };
 
-      // ── This-week boundaries (Mon–Sun of current real week) ─────────────
-      const today = new Date();
-      const dayOfWeek = today.getDay(); // 0 = Sun
-      const diffToMon = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
-      const weekStart = new Date(today);
-      weekStart.setHours(0, 0, 0, 0);
-      weekStart.setDate(today.getDate() + diffToMon);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 7);
-
-      const prevWeekStart = new Date(weekStart);
-      prevWeekStart.setDate(weekStart.getDate() - 7);
+      const prevMonthRange = monthRange(month === 1 ? year - 1 : year, month === 1 ? 12 : month - 1);
 
       // ── Run all aggregations in parallel ────────────────────────────────
       const [
-        thisWeekTrips,
-        lastWeekTrips,
         completionAgg,
+        prevCompletionAgg,
         dailyAgg,
         peakHourAgg,
         topDriversAgg,
       ] = await Promise.all([
 
-        // 1. This week's trip count
-        Ride.countDocuments({
-          createdAt: { $gte: weekStart, $lt: weekEnd },
-          status: { $in: ['completed', 'cancelled'] },
-        }),
-
-        // 2. Last week's trip count (for % change)
-        Ride.countDocuments({
-          createdAt: { $gte: prevWeekStart, $lt: weekStart },
-          status: { $in: ['completed', 'cancelled'] },
-        }),
-
-        // 3. Completed vs cancelled for selected month
+        // 1. Completed vs cancelled for selected month
         Ride.aggregate([
           { $match: finishedMatch },
+          {
+            $group: {
+              _id: null,
+              completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+              cancelled:  { $sum: { $cond: [{ $eq: ['$status', 'cancelled'] },  1, 0] } },
+            },
+          },
+        ]),
+
+        // 2. Completed vs cancelled for PREVIOUS month
+        Ride.aggregate([
+          { 
+            $match: {
+              createdAt: prevMonthRange,
+              status: { $in: ['completed', 'cancelled'] },
+            }
+          },
           {
             $group: {
               _id: null,
@@ -172,8 +165,15 @@ router.get(
         ? Math.round((completed / totalFinished) * 100)
         : 0;
 
-      const weekTrend = lastWeekTrips > 0
-        ? Math.round(((thisWeekTrips - lastWeekTrips) / lastWeekTrips) * 100)
+      const prevCompleted = prevCompletionAgg[0]?.completed ?? 0;
+      const prevCancelled = prevCompletionAgg[0]?.cancelled ?? 0;
+      const prevTotalFinished = prevCompleted + prevCancelled;
+      const prevCompletionRate = prevTotalFinished > 0
+        ? Math.round((prevCompleted / prevTotalFinished) * 100)
+        : null; // null if no previous data
+
+      const monthTrend = prevTotalFinished > 0
+        ? Math.round(((totalFinished - prevTotalFinished) / prevTotalFinished) * 100)
         : null;
 
       // Days in selected month
@@ -259,9 +259,10 @@ router.get(
         month: MONTH_NAMES[parseInt(month) - 1],
         year: parseInt(year),
         stats: {
-          thisWeekTrips,
-          weekTrendPct: weekTrend,
+          thisMonthTrips: totalFinished,
+          monthTrendPct: monthTrend,
           completionRate,
+          prevCompletionRate,
           avgDailyTrip,
           peakHour: peakLabel,
         },

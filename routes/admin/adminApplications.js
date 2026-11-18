@@ -6,6 +6,7 @@ const DriverApplication = require("../../models/DriverApplication");
 const User = require("../../models/User");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { logAdminAction } = require("../../utils/auditLogger");
+const { broadcastToAdmins } = require("../../services/socket");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -66,35 +67,41 @@ function toE164(mobileNumber) {
 }
 
 /**
- * Sends a notification to the driver via SMS.
+ * Sends a notification to the driver via SMS using IProgSMS.
+ * This function handles its own errors so it never interrupts the approval/rejection flow.
  */
-async function sendNotification(firstName, lastName, mobileNumber) {
+async function sendNotification(mobileNumber, message) {
   try {
-    const apiUsername = process.env.SMS_GATE_USERNAME;
-    const apiPassword = process.env.SMS_GATE_PASSWORD;
-    const recipient = toE164(mobileNumber);
+    const iProgSmsToken = process.env.IPROGSMS_API_TOKEN;
+    const iProgSmsUrl = process.env.IPROGSMS_API_URL;
+    if (!iProgSmsUrl) return;
 
-    const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
+    const endpoint = iProgSmsUrl.replace(/\/$/, '');
+    const payloadBody = {
+      api_token: iProgSmsToken,
+      phone_number: mobileNumber,
+      message: message,
+      sms_provider: 1 // Using alternative route to bypass some telco blocks
+    };
+
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
         "Content-Type": "application/json",
+        "Accept": "application/json"
       },
-      body: JSON.stringify({
-        phoneNumbers: [recipient],
-        textMessage: { text: `${firstName} ${lastName}, your driver application has been approved. You can now log in to the app.` },
-      }),
+      body: JSON.stringify(payloadBody),
+      signal: AbortSignal.timeout(5000)
     });
 
-    const data = await response.json();
-
     if (response.ok) {
-      console.log(`[adminApplications] Notification sent to ${mobileNumber}`);
+      console.log(`[adminApplications] Notification queued for ${mobileNumber}`);
     } else {
+      const data = await response.text();
       console.error(`[adminApplications] Notification failed for ${mobileNumber}:`, data);
     }
   } catch (err) {
-    console.error(`[adminApplications] Notification error for ${mobileNumber}:`, err);
+    console.error(`[adminApplications] Notification error for ${mobileNumber}:`, err.message || err);
   }
 }
 
@@ -118,7 +125,8 @@ router.get("/", readLimiter, async (req, res) => {
     const query = { status };
 
     if (search) {
-      const regex = new RegExp(search, "i");
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, "i");
       query.$or = [
         { firstName: regex },
         { lastName: regex },
@@ -267,13 +275,23 @@ router.post("/:id/approve", actionLimiter, async (req, res) => {
 
     await logAdminAction(req, req.user.id, "", "DRIVER_APPROVED", `Approved driver application for ${application.firstName} ${application.lastName} (License: ${application.licenseNumber})`);
 
-    await sendNotification(application.firstName, application.lastName, application.mobileNumber);
+    // Fire and forget: don't await so it never blocks the response!
+    const approveMsg = `Finder: Your driver application is APPROVED! You can now log in.`;
+    sendNotification(application.mobileNumber, approveMsg).catch(console.error);
+    
+    broadcastToAdmins('application_resolved', { applicationId: application._id });
 
     return res.status(200).json({ message: "Application approved. Driver account created." });
 
   } catch (err) {
     if (err.code === 11000) {
-      return res.status(409).json({ message: "Duplicate entry detected." });
+      let duplicateField = "entry";
+      if (err.keyPattern) {
+        if (err.keyPattern.mobileNumber) duplicateField = "mobile number";
+        else if (err.keyPattern['driverDetails.licenseNumber']) duplicateField = "license number";
+        else if (err.keyPattern['driverDetails.plateNumber']) duplicateField = "plate number";
+      }
+      return res.status(409).json({ message: `A driver with this ${duplicateField} already exists.` });
     }
     console.error("[admin/applications/:id/approve]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
@@ -314,6 +332,12 @@ router.post("/:id/reject", actionLimiter, async (req, res) => {
     await DriverApplication.findByIdAndDelete(application._id);
 
     await logAdminAction(req, req.user.id, "", "DRIVER_REJECTED", `Rejected driver application for ${application.firstName} ${application.lastName} (License: ${application.licenseNumber}). Reason: ${reason || "None provided"}`);
+    
+    // Fire and forget
+    const rejectMsg = `Finder: Your driver application was REJECTED. ${reason ? 'Reason: ' + reason : 'Please contact support.'}`;
+    sendNotification(application.mobileNumber, rejectMsg).catch(console.error);
+
+    broadcastToAdmins('application_resolved', { applicationId: application._id });
 
     return res.status(200).json({
       message: "Application rejected and removed.",

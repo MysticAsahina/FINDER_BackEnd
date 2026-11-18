@@ -3,6 +3,7 @@ const express  = require('express');
 const cors     = require('cors');
 const cookieParser = require('cookie-parser');
 const mongoose = require("mongoose");
+const helmet   = require('helmet');
 
 const authRouter             = require("./routes/auth");
 const registerRouter         = require('./routes/register');
@@ -18,26 +19,68 @@ const supportRouter          = require('./routes/support');
 const driverStatusRouter     = require('./routes/driver/status');
 const passengerRideRouter    = require('./routes/passenger/ride');
 const driverRideRouter       = require('./routes/driver/ride');
+const driverDispatchRouter   = require('./routes/driver/dispatch');
 const passengerChatRouter    = require('./routes/passenger/chat');
 const driverChatRouter       = require('./routes/driver/chat');
 const emergencyContactRouter = require('./routes/emergencyContact');
 const adminSettingsRouter       = require('./routes/admin/settings');
 const passengerSettingsRouter   = require('./routes/passenger/settings');
+const passengerDiscountRouter   = require('./routes/passenger/discount');
+const adminDiscountRouter       = require('./routes/admin/discount');
+const adminFlaggedRouter        = require('./routes/admin/flagged');
+const adminSuspendedRouter      = require('./routes/admin/suspended');
 const mapsRouter                = require('./routes/maps');
 const chatMediaRouter           = require('./routes/chatMedia');
+const adminDashboardRouter        = require('./routes/admin/dashboard');
+const adminAnalyticsRouter         = require('./routes/admin/analytics');
+const adminBadgesRouter            = require('./routes/admin/badges');
+const paymentRouter                 = require('./routes/passenger/payment');
+const appealsRouter                 = require('./routes/appeals');
+const adminAppealsRouter            = require('./routes/admin/appeals');
+const walletRouter                  = require('./routes/wallet');
+const adminWalletRouter             = require('./routes/admin/wallet');
+
+const publicRouter                = require('./routes/public');
 
 const http = require("http");
 const socketService = require("./services/socket");
+const { startIdleMonitor } = require("./services/idleMonitor");
+
+require('dns').setDefaultResultOrder('ipv4first');
 
 const app    = express();
+app.use(helmet());
+app.set('trust proxy', 1); // Trust the proxy from Render
 const server = http.createServer(app);
 const port   = process.env.PORT;
 
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile React Native apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const allowed = [
+      'https://finder-admin.mcreysc980.workers.dev',
+      'https://finderadmin.pages.dev',
+      'https://finder-public.pages.dev',
+    ];
+
+    if (allowed.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true
 }));
-app.use(express.json());
+
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf; // This saves the raw text so we can verify the PayMongo signature
+  }
+}));
+
 app.use(cookieParser());
 
 app.use("/auth",               authRouter);
@@ -52,41 +95,95 @@ app.use('/admin/audit-logs', adminAuditLogsRouter);
 app.use('/admin/drivers', adminDriversRouter);
 app.use('/admin/settings', adminSettingsRouter);
 app.use('/admin/reports', adminReportsRouter);
+app.use('/admin/dashboard', adminDashboardRouter);
+app.use('/admin/analytics', adminAnalyticsRouter);
+app.use('/admin/badges', adminBadgesRouter);
 
 app.use('/support', supportRouter);
 app.use('/driver/status', driverStatusRouter);
+app.use('/driver/location-ping', (req, res, next) => { req.url = '/location-ping' + (req.url === '/' ? '' : req.url); driverStatusRouter(req, res, next); });
 app.use('/passenger/ride', passengerRideRouter);
 app.use('/driver/ride', driverRideRouter);
+app.use('/driver/dispatch', driverDispatchRouter);
 app.use('/passenger/ride', passengerChatRouter);
 app.use('/driver/ride', driverChatRouter);
 app.use('/emergency-contact', emergencyContactRouter);
 app.use('/passenger/settings', passengerSettingsRouter);
+app.use('/passenger/discount', passengerDiscountRouter);
+app.use('/admin/discount-applications', adminDiscountRouter);
+app.use('/admin/flagged-accounts', adminFlaggedRouter);
+app.use('/admin/suspended-accounts', adminSuspendedRouter);
 app.use('/maps', mapsRouter);
 app.use('/chat', chatMediaRouter);
 
+app.use('/passenger/payment', paymentRouter);
+app.use('/appeals', appealsRouter);
+app.use('/admin/appeals', adminAppealsRouter);
+app.use('/wallet', walletRouter);
+app.use('/admin/wallet', adminWalletRouter);
+app.use('/public', publicRouter);
+
 app.get('/', (_req, res) => {
-  res.send('Hello World.');
+  res.send('No errors here, probably.');
 });
 
 // Health check
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
   const state = mongoose.connection.readyState;
-  // 0: disconnected, 1: connected, 2: connecting, 3: disconnecting
-  if (state === 1) {
+  if (state !== 1) {
+    return res.status(500).json({ status: "db-fail", readyState: state });
+  }
+
+  try {
+    // Send a real network packet to MongoDB to keep the TCP socket alive
+    // and verify the connection isn't a dead "zombie" socket.
+    await mongoose.connection.db.command({ ping: 1 });
     res.json({ status: "ok", uptime: process.uptime() });
-  } else {
-    res.status(500).json({ status: "db-fail", readyState: state });
+  } catch (error) {
+    console.error("Health check ping failed:", error);
+    res.status(500).json({ status: "db-fail", error: error.message });
   }
 });
 
-mongoose.connect(process.env.MONGO_URI)
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ message: "Internal server error." });
+});
+
+mongoose.connect(process.env.MONGO_URI, {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 10000, // 10s (staggered below the 15s client timeout)
+  maxIdleTimeMS: 60000, // Close idle connections before the cloud firewall silently drops them
+})
   .then(() => {
     console.log("MongoDB connected");
+
+    // Internal Keep-Alive: Ping MongoDB every 3 minutes to prevent the cloud firewall 
+    // from silently dropping the TCP socket due to inactivity (usually drops after 4-5 mins).
+    // This runs completely independently of your 10-minute external health checker!
+    setInterval(() => {
+      if (mongoose.connection.readyState === 1) {
+        mongoose.connection.db.command({ ping: 1 }).catch(console.error);
+      }
+    }, 3 * 60 * 1000);
+
     socketService.init(server);
+    startIdleMonitor();
+
+    // Seed default MVGFCI terminal if needed
+    const Terminal = require("./models/Terminal");
+    Terminal.getMvgfciTerminal().catch(console.error);
+
+    // Recover any active booking buffers from prior restart
+    const { recoverDanglingBuffers } = require("./services/bookingDistributor");
+    recoverDanglingBuffers();
+
     server.listen(port, () => {
       console.log(`Listening on port ${port}`);
     });
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err);
+    process.exit(1);
   });

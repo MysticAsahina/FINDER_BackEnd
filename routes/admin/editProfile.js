@@ -5,44 +5,9 @@ const jwt = require("jsonwebtoken");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { logAdminAction } = require("../../utils/auditLogger");
 const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
+const { validateEmailFormat, validateEmailLength, validatePasswordLength, validatePasswordPolicy, validateName, validateMobileFormat } = require('../../utils/validators');
 
 const router = express.Router();
-
-// ---------------------------------------------------------------------------
-// Field validators
-// Each function returns an error message string if invalid, null if valid.
-// TODO: Group these into a single file and import as needed.
-// ---------------------------------------------------------------------------
-
-function validateEmailFormat(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) return "Invalid email format.";
-  return null;
-}
-
-function validateEmailLength(email) {
-  if (email.length > 254) return "Email is too long.";
-  return null;
-}
-
-function validatePasswordLength(password) {
-  // Upper cap prevents bcrypt DoS via oversized inputs
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
-
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
-
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -54,11 +19,11 @@ const editProfileLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Too many edit profile attempts. Please try again in 15 minutes." },
+  message: { message: "Too many attempts. Please try again in 15 minutes." },
 });
 
 router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async (req, res) => {
-  const { firstName, lastName, email, mobileNumber, password } = req.body;
+  const { firstName, lastName, email, mobileNumber, password, currentPassword } = req.body;
 
   const errors = [];
   
@@ -85,8 +50,9 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
   }
 
   if (password !== undefined) {
-    const passwordLenError = validatePasswordLength(password);
-    if (passwordLenError) errors.push(passwordLenError);
+    const passwordError = validatePasswordPolicy(password);
+    if (passwordError) errors.push(passwordError);
+    if (!currentPassword) errors.push("Current password is required to change password.");
   }
 
   if (errors.length > 0) {
@@ -96,6 +62,16 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
   try {
     const updatedUser = await User.findById(req.user.id);
     if (!updatedUser) return res.status(404).json({ message: "User not found." });
+
+    if (password !== undefined) {
+      const isMatch = await updatedUser.comparePassword(currentPassword);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Current password is incorrect." });
+      }
+      if (currentPassword === password) {
+        return res.status(400).json({ message: "New password cannot be the same as your current password." });
+      }
+    }
 
     const isEmailChanged = email && email.trim() && email.trim() !== updatedUser.email;
     const isMobileChanged = mobileNumber && mobileNumber.trim() && mobileNumber.trim() !== updatedUser.mobileNumber;
@@ -135,12 +111,12 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('admin'), async 
       });
     }
 
-    // Neither changed (just name/password), send to current mobile to verify identity
-    await sendSmsOtp(otpKey, updatedUser.mobileNumber, updateData);
+    // Neither changed (just name/password), send to current email to verify identity
+    await createAndSendEmailOtp(otpKey, updatedUser.email, updateData);
     return res.status(200).json({
         pendingProfileOtp: true,
-        destination: "current mobile",
-        message: "An OTP has been sent to your registered mobile number to verify these changes.",
+        destination: "current email",
+        message: "An OTP has been sent to your registered email address to verify these changes.",
     });
   } catch (err) {
     console.error("[admin-edit-profile]", err);
@@ -169,7 +145,9 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('adm
     Object.assign(updatedUser, updateData);
     await updatedUser.save();
 
-    await logAdminAction(req, updatedUser._id, updatedUser.firstName + " " + updatedUser.lastName, "PROFILE_EDITED", "Admin updated profile details");
+    const action = updateData.password ? "PASSWORD_CHANGED" : "PROFILE_EDITED";
+    const details = updateData.password ? "Admin updated profile and changed password" : "Admin updated profile details";
+    await logAdminAction(req, updatedUser._id, updatedUser.firstName + " " + updatedUser.lastName, action, details);
 
     return res.status(200).json({
       message: "Profile updated successfully.",
@@ -179,7 +157,8 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('adm
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
         email: updatedUser.email,
-        mobileNumber: updatedUser.mobileNumber
+        mobileNumber: updatedUser.mobileNumber,
+        profilePicture: updatedUser.profilePicture || null,
       }
     });
   } catch (err) {
@@ -187,6 +166,83 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('adm
       return res.status(409).json({ message: "Email or mobile number is already in use." });
     }
     console.error("[admin-verify-profile-update]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Change Password with Email OTP
+// ---------------------------------------------------------------------------
+
+router.post("/change-password", editProfileLimiter, authenticate, requireRole('admin'), async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword) {
+    return res.status(400).json({ message: "Current password is required." });
+  }
+  if (!newPassword) {
+    return res.status(400).json({ message: "New password is required." });
+  }
+
+  const passwordError = validatePasswordPolicy(newPassword);
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect." });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "New password cannot be the same as your current password." });
+    }
+
+    const otpKey = req.user.id + "_adminPasswordChange";
+    await createAndSendEmailOtp(otpKey, user.email, { password: newPassword });
+
+    return res.status(200).json({
+      pendingPasswordOtp: true,
+      message: "An OTP has been sent to your registered email address to verify this password change.",
+    });
+  } catch (err) {
+    console.error("[admin-change-password]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+router.post("/verify-password-change", editProfileLimiter, authenticate, requireRole('admin'), async (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code.trim())) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  const otpKey = req.user.id + "_adminPasswordChange";
+  const otpResult = verifyOtp(otpKey, code.trim());
+
+  if (!otpResult.valid) {
+    return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+  }
+
+  try {
+    const { password } = otpResult.payload;
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    user.password = password;
+    await user.save();
+
+    await logAdminAction(req, user._id, user.firstName + " " + user.lastName, "PASSWORD_CHANGED", "Admin changed password");
+
+    return res.status(200).json({
+      message: "Password changed successfully."
+    });
+  } catch (err) {
+    console.error("[admin-verify-password-change]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
   }
 });

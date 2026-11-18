@@ -13,52 +13,123 @@ function generateOtp() {
   return String(crypto.randomInt(100000, 999999));
 }
 
-// Converts number to E164 format, used for OTP
+// Converts number to E164 format, used for OTP, use if SMS API requires E164 format (+639XXXXXXXXX)
 function toE164(mobileNumber) {
-  return '+63' + mobileNumber.slice(1);
+  if (mobileNumber.startsWith('09')) {
+    return '+63' + mobileNumber.slice(1);
+  } else if (!mobileNumber.startsWith('+')) {
+    return '+' + mobileNumber;
+  }
+  return mobileNumber;
+}
+
+async function sendSms(mobileNumber, message) {
+  const iProgSmsToken = process.env.IPROGSMS_API_TOKEN;
+  const iProgSmsUrl = process.env.IPROGSMS_API_URL;
+
+  if (iProgSmsUrl) {
+    try {
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      };
+
+      let endpoint = iProgSmsUrl.replace(/\/$/, '');
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          api_token: iProgSmsToken,
+          phone_number: mobileNumber,
+          message: message,
+          sms_provider: 1
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      const responseText = await response.text();
+      if (!response.ok) {
+        throw new Error(`Failed to send SMS via IProgSMS. HTTP Status: ${response.status} - ${responseText}`);
+      }
+      try {
+        const jsonResponse = JSON.parse(responseText);
+        if (jsonResponse.status && jsonResponse.status >= 400) {
+          throw new Error(`IProgSMS API Error: ${JSON.stringify(jsonResponse.message || jsonResponse)}`);
+        }
+      } catch (parseErr) {
+        if (parseErr.message.includes('IProgSMS API Error')) throw parseErr;
+      }
+    } catch (err) {
+      console.error("[IProgSMS] SMS Gateway Error:", err);
+      throw err;
+    }
+  } else {
+    console.log(`[MOCK SMS] Would have sent to ${mobileNumber}: "${message}"`);
+  }
 }
 
 async function sendSmsOtp(key, mobileNumber, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
-  const recipient = toE164(mobileNumber);
 
-  const apiUsername = process.env.SMS_GATE_USERNAME;
-  const apiPassword = process.env.SMS_GATE_PASSWORD;
-
-  /* Temporary remove due to lack of load
-  const response = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
-    method: "POST",
-    headers: {
-      "Authorization": "Basic " + btoa(`${apiUsername}:${apiPassword}`),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      phoneNumbers: [ recipient ],
-      textMessage: {text: `Your verification code is ${code}. It expires in 5 minutes. Do not share this with anyone.`},
-    }),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    const err = new Error(data.message || "Failed to send OTP.");
-    err.smsStatus = response.status;
-    err.smsCode   = data.code;
-    throw err;
-  } */
-
-  console.log("SMS Code for " + recipient + ": " + code);
+  // Save the OTP to memory BEFORE attempting to send it.
+  // If the SMS Gateway takes too long to respond and our 10-second timeout triggers,
+  // the SMS might still eventually reach the user's phone. By saving it first, 
+  // they can still successfully verify it!
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
+
+  const iProgSmsToken = process.env.IPROGSMS_API_TOKEN;
+  const iProgSmsUrl = process.env.IPROGSMS_API_URL;
+
+  if (iProgSmsUrl) {
+    try {
+      const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      };
+
+      let endpoint = iProgSmsUrl.replace(/\/$/, '');
+      const payloadBody = {
+        api_token: iProgSmsToken,
+        phone_number: mobileNumber,
+        message: `Your code expires in 5 minutes: ${code}`,
+        sms_provider: 1
+      };
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payloadBody),
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        throw new Error(`Failed to send OTP via IProgSMS. Status: ${response.status} - ${responseText}`);
+      }
+      
+      console.log(`[IProgSMS] Successfully queued OTP to ${mobileNumber}`);
+      console.log(`[IProgSMS] Response: ${responseText}`);
+
+    } catch (err) {
+      console.error("[IProgSMS] SMS Gateway Error:", err.message || err);
+      throw err;
+    }
+  } else {
+    // FALLBACK: If there's no API URL in the .env, print the OTP to the console for testing purposes.
+    console.log(`[MOCK SMS] Would have sent code ${code} to ${mobileNumber}`);
+  }
 }
 
 async function createAndSendEmailOtp(key, emailAddress, payload = {}) {
   const code = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRY_MS;
 
-  await sendEmailOtp(emailAddress, code);
-
   otpStore.set(String(key), { code, expiresAt, attempts: 0, payload });
+
+  await sendEmailOtp(emailAddress, code);
 }
 
 function verifyOtp(key, submittedCode) {
@@ -83,6 +154,7 @@ function verifyOtp(key, submittedCode) {
 }
 
 module.exports = {
+  sendSms,
   sendSmsOtp,
   createAndSendEmailOtp,
   verifyOtp,

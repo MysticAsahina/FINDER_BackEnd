@@ -75,6 +75,10 @@ router.post("/:rideId/chat", authenticate, requireRole("driver"), messageLimiter
     }
 
     ride.chatMessages.push(newMessage);
+    if (!ride.cancellationData) {
+      ride.cancellationData = {};
+    }
+    ride.cancellationData.lastDriverCommunicationAt = new Date();
     await ride.save();
 
     // Broadcast the message via socket
@@ -85,6 +89,14 @@ router.post("/:rideId/chat", authenticate, requireRole("driver"), messageLimiter
       mediaType: newMessage.mediaType || null,
       time: newMessage.time,
       id: newMessage.id,
+    });
+
+    // Send push notification to passenger
+    const { sendPushToUser } = require("../../services/notification");
+    const pushText = hasText ? text : (mediaType === "image" ? "📷 Sent an image" : "🎥 Sent a video");
+    sendPushToUser(ride.passengerId, "New message from Driver", pushText, {
+      type: "ride_chat",
+      rideId: ride._id.toString()
     });
 
     res.json({ message: newMessage });

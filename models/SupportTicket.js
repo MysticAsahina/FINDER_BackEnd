@@ -22,6 +22,15 @@ const supportTicketSchema = new mongoose.Schema(
       enum: ["open", "resolved"],
       default: "open",
     },
+    rideId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Ride",
+      default: null,
+    },
+    hasUnreadAdmin: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );

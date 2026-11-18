@@ -1,25 +1,17 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
-const { authenticate } = require("../middleware/auth");
+const { authenticate, requireRole } = require("../middleware/auth");
 const User = require("../models/User");
+const { validateName, validateMobileFormat } = require('../utils/validators');
 
 const router = express.Router();
 
 // ---------------------------------------------------------------------------
 // Field validators
 // ---------------------------------------------------------------------------
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
 
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
+
+
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -30,6 +22,14 @@ const emergencyContactLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many attempts. Please try again in 15 minutes." },
+});
+
+const emergencyTriggerLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 2, // Allow max 2 emergency alerts every 5 minutes to prevent spam/costs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Emergency alert already triggered recently. Please wait a few minutes." },
 });
 
 // GET /emergency-contact
@@ -91,6 +91,67 @@ router.patch("/", emergencyContactLimiter, authenticate, async (req, res) => {
   } catch (err) {
     console.error("[patch-emergency-contact]", err);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /emergency-contact/trigger
+// Triggers an emergency SMS alert to the configured contact
+router.post("/trigger", authenticate, requireRole("passenger", "driver"), emergencyTriggerLimiter, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("firstName lastName emergencyContact role");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!user.emergencyContact || !user.emergencyContact.mobileNumber) {
+      return res.status(400).json({ message: "No emergency contact configured." });
+    }
+
+    const { latitude, longitude } = req.body;
+
+    const Ride = require("../models/Ride");
+    
+    // Find active ride based on user role
+    const rideQuery = {
+      status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+    };
+    if (user.role === "driver") {
+      rideQuery.driverId = user._id;
+    } else {
+      rideQuery.passengerId = user._id;
+    }
+
+    const activeRide = await Ride.findOne(rideQuery).populate(
+      user.role === "driver" ? "passengerId" : "driverId",
+      "firstName lastName driverDetails mobileNumber"
+    );
+
+    const contact = user.emergencyContact;
+    let message = `EMERGENCY ALERT: ${user.firstName} ${user.lastName} has triggered an emergency alert during their Finder ride.`;
+
+    if (activeRide) {
+      if (user.role === "passenger" && activeRide.driverId) {
+        const driver = activeRide.driverId;
+        const plateNo = driver.driverDetails?.plateNumber || 'Unknown';
+        const vehicle = driver.driverDetails?.vehicleType || 'Vehicle';
+        message += ` Driver: ${driver.firstName} ${driver.lastName}, ${vehicle} (Plate: ${plateNo}).`;
+      } else if (user.role === "driver" && activeRide.passengerId) {
+        const passenger = activeRide.passengerId;
+        message += ` Passenger: ${passenger.firstName} ${passenger.lastName}.`;
+      }
+    }
+
+    if (latitude && longitude) {
+      message += ` Location Coordinates (Paste in Google Maps): ${latitude}, ${longitude}`;
+    }
+
+    const { sendSms } = require("../utils/otpManager");
+    await sendSms(contact.mobileNumber, message);
+
+    res.json({ message: "Emergency alert sent successfully." });
+  } catch (err) {
+    console.error("[post-emergency-trigger]", err);
+    res.status(500).json({ message: "Failed to send emergency alert." });
   }
 });
 

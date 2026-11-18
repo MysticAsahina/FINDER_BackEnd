@@ -12,13 +12,14 @@ router.get("/fare", async (req, res) => {
         key: "fare",
         baseFare: 25,
         perKmFare: 8.5,
-        baseDistance: 2,
+        baseDistance: 3,
       });
     }
     return res.status(200).json({
       baseFare: settings.baseFare,
       perKmFare: settings.perKmFare,
       baseDistance: settings.baseDistance,
+      ordinanceUrl: settings.ordinanceUrl,
     });
   } catch (err) {
     console.error("[passenger/settings/fare GET]", err);

@@ -33,7 +33,16 @@ router.get("/", async (req, res) => {
     }
 
     // Filter by date
-    if (dateFilter) {
+    if (req.query.month && req.query.year) {
+      const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      const monthIndex = monthNames.indexOf(req.query.month);
+      if (monthIndex !== -1) {
+        const year = parseInt(req.query.year);
+        const startOfMonth = new Date(year, monthIndex, 1);
+        const endOfMonth = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+        query.createdAt = { $gte: startOfMonth, $lte: endOfMonth };
+      }
+    } else if (dateFilter) {
       const now = new Date();
       if (dateFilter === "Today") {
         const startOfDay = new Date(now.setHours(0, 0, 0, 0));
@@ -50,7 +59,8 @@ router.get("/", async (req, res) => {
 
     // Search text
     if (search) {
-      const regex = new RegExp(search, "i");
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, "i");
       query.$or = [
         { adminName: regex },
         { details: regex },

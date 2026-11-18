@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
-const SALT_ROUNDS = 12;
+const SALT_ROUNDS = 10;
 
 // ---------------------------------------------------------------------------
 // driverDetails sub-schema
@@ -22,6 +22,9 @@ const driverDetailsSchema = new mongoose.Schema(
     motorcycleBrand:  { type: String, required: true },
     plateNumber:      { type: String, required: true },
     mpin:             { type: String, default: null }, // optional; hashed on save
+    ratingSum:        { type: Number, default: 0 },
+    totalReviews:     { type: Number, default: 0 },
+    averageRating:    { type: Number, default: 5.0 },
   },
   { _id: false } // no separate _id for the subdocument
 );
@@ -58,6 +61,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    profilePicture: {
+      type: String,
+      default: null,
+    },
     role: {
       type: String,
       enum: ["admin", "passenger", "driver"],
@@ -71,6 +78,24 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     
+    // --- Passenger-only fields ---
+    isDiscountVerified: {
+      type: Boolean,
+      default: false,
+    },
+    discountType: {
+      type: String,
+      default: null,
+    },
+    discountIdNumber: {
+      type: String,
+      default: null,
+    },
+    discountExpiration: {
+      type: String,
+      default: null,
+    },
+
     pushTokens: {
       type: [String],
       default: [],
@@ -81,6 +106,25 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
+    // --- Wallet & Digital Payments ---
+    walletBalance: {
+      type: Number,
+      default: 0,
+    },
+    savedPayoutDetails: {
+      type: {
+        method: { type: String, default: 'gcash' },
+        accountName: { type: String, default: '' },
+        mobileNumber: { type: String, default: '' },
+      },
+      default: null,
+    },
+
     // --- Emergency Contact (optional for all users) ---
     emergencyContact: {
       type: {
@@ -90,6 +134,69 @@ const userSchema = new mongoose.Schema(
       },
       default: null,
     },
+    
+    // --- Flagging / Restriction fields ---
+    isFlagged: {
+      type: Boolean,
+      default: false,
+    },
+    flagReason: {
+      type: String,
+      default: null,
+    },
+    flaggedAt: {
+      type: Date,
+      default: null,
+    },
+    warningCount: {
+      type: Number,
+      default: 0,
+    },
+    restrictionEndDate: {
+      type: Date,
+      default: null,
+    },
+    isSuspended: {
+      type: Boolean,
+      default: false,
+    },
+    suspensionType: {
+      type: String,
+      enum: ['temp_suspend', 'suspend_resolved', 'perm_suspend', null],
+      default: null,
+    },
+    suspensionReason: {
+      type: String,
+      default: null,
+    },
+    suspensionEndDate: {
+      type: Date,
+      default: null,
+    },
+    appealCount: {
+      type: Number,
+      default: 0,
+    },
+    isPermanentlyDisabled: {
+      type: Boolean,
+      default: false,
+    },
+    strikes: [{
+      type: {
+        type: String,
+        enum: [
+          'frequent_cancellation',
+          'unresponsive_passenger',
+          'unresponsive_driver',
+          'policy_violation',
+          'late_arrival',
+          'reported_trip'
+        ]
+      },
+      rideId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ride' },
+      reportedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      createdAt: { type: Date, default: Date.now }
+    }],
   },
   { timestamps: true }
 );
@@ -98,7 +205,7 @@ const userSchema = new mongoose.Schema(
 // Indexes
 // ---------------------------------------------------------------------------
 userSchema.index({ email: 1 },                              { unique: true, sparse: true });
-userSchema.index({ mobileNumber: 1 },                       { unique: true });
+userSchema.index({ mobileNumber: 1, role: 1 },                { unique: true });
 userSchema.index({ "driverDetails.licenseNumber": 1 },      { unique: true, sparse: true });
 userSchema.index({ "driverDetails.plateNumber": 1 },        { unique: true, sparse: true });
 
@@ -119,6 +226,14 @@ userSchema.pre("save", async function () {
   // Non-drivers cannot carry driverDetails
   if (this.role !== "driver" && this.driverDetails) {
     this.driverDetails = null;
+  }
+
+  // Non-passengers cannot carry discount verification
+  if (this.role !== "passenger") {
+    this.isDiscountVerified = false;
+    this.discountType = null;
+    this.discountIdNumber = null;
+    this.discountExpiration = null;
   }
 });
 

@@ -4,44 +4,9 @@ const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const { sendSmsOtp, createAndSendEmailOtp, verifyOtp } = require("../../utils/otpManager");
+const { validateEmailFormat, validateEmailLength, validatePasswordLength, validatePasswordPolicy, validateName, validateMobileFormat } = require('../../utils/validators');
 
 const router = express.Router();
-
-// ---------------------------------------------------------------------------
-// Field validators
-// Each function returns an error message string if invalid, null if valid.
-// TODO: Group these into a single file and import as needed.
-// ---------------------------------------------------------------------------
-
-function validateEmailFormat(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) return "Invalid email format.";
-  return null;
-}
-
-function validateEmailLength(email) {
-  if (email.length > 254) return "Email is too long.";
-  return null;
-}
-
-function validatePasswordLength(password) {
-  // Upper cap prevents bcrypt DoS via oversized inputs
-  if (password.length > 128) return "Password is too long.";
-  return null;
-}
-
-function validateName(value, field) {
-  if (!value || !value.trim()) return `${field} is required.`;
-  if (value.trim().length > 50) return `${field} is too long.`;
-  return null;
-}
-
-function validateMobileFormat(mobileNumber) {
-  // PH mobile format: 09XXXXXXXXX (11 digits starting with 09)
-  const mobileRegex = /^09\d{9}$/;
-  if (!mobileRegex.test(mobileNumber)) return "Invalid mobile number format.";
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Rate limiters
@@ -57,7 +22,7 @@ const editProfileLimiter = rateLimit({
 });
 
 router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), async (req, res) => {
-  const { firstName, lastName, email, mobileNumber, password } = req.body;
+  const { firstName, lastName, email, mobileNumber, password, currentPassword } = req.body;
 
   const errors = [];
   
@@ -69,7 +34,12 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), as
 
   if (mobileNumber) {
     const mobileError = validateMobileFormat(mobileNumber.trim());
-    if (mobileError) errors.push(mobileError);
+    if (mobileError) {
+      errors.push(mobileError);
+    } else {
+      const existing = await User.findOne({ mobileNumber: mobileNumber.trim(), role: "passenger", _id: { $ne: req.user.id } });
+      if (existing) errors.push("This mobile number is already in use.");
+    }
   } else {
     errors.push("Mobile number is required.");
   }
@@ -82,8 +52,11 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), as
   }
 
   if (password !== undefined) {
-    const passwordLenError = validatePasswordLength(password);
-    if (passwordLenError) errors.push(passwordLenError);
+    const passwordError = validatePasswordPolicy(password);
+    if (passwordError) errors.push(passwordError);
+    if (!currentPassword) {
+      errors.push("Current password is required to change password.");
+    }
   }
 
   if (errors.length > 0) {
@@ -93,6 +66,16 @@ router.patch("/", editProfileLimiter, authenticate, requireRole('passenger'), as
   try {
     const updatedUser = await User.findById(req.user.id);
     if (!updatedUser) return res.status(404).json({ message: "User not found." });
+
+    if (password !== undefined) {
+      const isMatch = await updatedUser.comparePassword(currentPassword);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Current password is incorrect." });
+      }
+      if (currentPassword === password) {
+        return res.status(400).json({ message: "New password cannot be the same as your current password." });
+      }
+    }
 
     const isEmailChanged = email && email.trim() && email.trim() !== updatedUser.email;
     const isMobileChanged = mobileNumber && mobileNumber.trim() && mobileNumber.trim() !== updatedUser.mobileNumber;
@@ -175,7 +158,10 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('pas
         firstName: updatedUser.firstName,
         lastName: updatedUser.lastName,
         email: updatedUser.email,
-        mobileNumber: updatedUser.mobileNumber
+        mobileNumber: updatedUser.mobileNumber,
+        profilePicture: updatedUser.profilePicture || null,
+        isDiscountVerified: updatedUser.isDiscountVerified,
+        discountType: updatedUser.discountType,
       }
     });
   } catch (err) {
@@ -183,6 +169,84 @@ router.post("/verify-update", editProfileLimiter, authenticate, requireRole('pas
       return res.status(409).json({ message: "Email or mobile number is already in use." });
     }
     console.error("[passenger-verify-profile-update]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Change Password with SMS OTP
+// ---------------------------------------------------------------------------
+
+router.post("/change-password", editProfileLimiter, authenticate, requireRole('passenger'), async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!currentPassword) {
+    return res.status(400).json({ message: "Current password is required." });
+  }
+  if (!newPassword) {
+    return res.status(400).json({ message: "New password is required." });
+  }
+  if (confirmPassword && newPassword !== confirmPassword) {
+    return res.status(400).json({ message: "Passwords do not match." });
+  }
+
+  const passwordError = validatePasswordPolicy(newPassword);
+  if (passwordError) {
+    return res.status(400).json({ message: passwordError });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect." });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "New password cannot be the same as your current password." });
+    }
+
+    const otpKey = req.user.id + "_passengerPasswordChange";
+    await sendSmsOtp(otpKey, user.mobileNumber, { password: newPassword });
+
+    return res.status(200).json({
+      pendingPasswordOtp: true,
+      message: "An OTP has been sent to your registered mobile number to verify this password change.",
+    });
+  } catch (err) {
+    console.error("[passenger-change-password]", err);
+    return res.status(500).json({ message: "Server error. Please try again." });
+  }
+});
+
+router.post("/verify-password-change", editProfileLimiter, authenticate, requireRole('passenger'), async (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== "string" || !/^\d{6}$/.test(code.trim())) {
+    return res.status(400).json({ message: "A valid 6-digit OTP code is required." });
+  }
+
+  const otpKey = req.user.id + "_passengerPasswordChange";
+  const otpResult = verifyOtp(otpKey, code.trim());
+
+  if (!otpResult.valid) {
+    return res.status(401).json({ message: otpResult.message || "Invalid or expired OTP." });
+  }
+
+  try {
+    const { password } = otpResult.payload;
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    user.password = password;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Password changed successfully."
+    });
+  } catch (err) {
+    console.error("[passenger-verify-password-change]", err);
     return res.status(500).json({ message: "Server error. Please try again." });
   }
 });

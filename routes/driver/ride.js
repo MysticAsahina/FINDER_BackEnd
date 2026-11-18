@@ -2,9 +2,12 @@ const express = require("express");
 const { authenticate, requireRole } = require("../../middleware/auth");
 const Ride = require("../../models/Ride");
 const ActiveDriver = require("../../models/ActiveDriver");
+const BookingBuffer = require("../../models/BookingBuffer");
+const bookingDistributor = require("../../services/bookingDistributor");
 const { broadcastToRide, sendToUser } = require("../../services/socket");
 const { matchRide } = require("../../services/rideMatcher");
 const { getDistanceInMeters } = require("../../utils/geo");
+const SystemSettings = require("../../models/SystemSettings");
 
 const router = express.Router();
 
@@ -12,9 +15,11 @@ const router = express.Router();
 router.get("/current", authenticate, requireRole("driver"), async (req, res) => {
   try {
     const ride = await Ride.findOne({
-      driverId: req.user.id,
-      status: { $nin: ["completed", "cancelled"] },
-    }).populate("passengerId", "firstName lastName mobileNumber");
+      $or: [
+        { driverId: req.user.id, status: { $nin: ["completed", "cancelled"] } },
+        { currentCandidateDriverId: req.user.id, status: "pending" }
+      ]
+    }).populate("passengerId", "firstName lastName mobileNumber profilePicture");
     
     res.json({ ride });
   } catch (err) {
@@ -31,7 +36,7 @@ router.get("/history", authenticate, requireRole("driver"), async (req, res) => 
       status: { $in: ["completed", "cancelled"] },
     })
       .sort({ createdAt: -1 })
-      .populate("passengerId", "firstName lastName mobileNumber");
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
     
     res.json({ rides });
   } catch (err) {
@@ -43,6 +48,20 @@ router.get("/history", authenticate, requireRole("driver"), async (req, res) => 
 // Accept a ride
 router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    // Check if there is an active buffer for this ride
+    const buffer = await BookingBuffer.findOne({
+      rideId: req.params.id,
+      status: "distributing",
+      "currentCandidate.driverId": req.user.id,
+    });
+    if (buffer) {
+      const result = await bookingDistributor.acceptOffer(buffer._id, req.user.id);
+      if (!result.success) {
+        return res.status(400).json(result);
+      }
+      return res.json({ message: "Ride accepted", ride: result.ride });
+    }
+
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ message: "Ride not found." });
 
@@ -53,6 +72,14 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
     // Assign driver and update status
     ride.driverId = req.user.id;
     ride.status = "driver_assigned";
+    
+    const driverState = await ActiveDriver.findOne({ driverId: req.user.id });
+    if (!ride.cancellationData) ride.cancellationData = {};
+    ride.cancellationData.driverAssignedAt = new Date();
+    if (driverState && driverState.location) {
+      ride.cancellationData.driverAcceptedLocation = driverState.location;
+    }
+    
     await ride.save();
 
     // Set driver as busy
@@ -60,8 +87,8 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
 
     // Notify passenger
     const populatedRide = await Ride.findById(ride._id)
-      .populate("driverId", "firstName lastName mobileNumber driverDetails")
-      .populate("passengerId", "firstName lastName mobileNumber");
+      .populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails")
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
     broadcastToRide(ride._id, "ride_accepted", { ride: populatedRide });
 
     res.json({ message: "Ride accepted", ride: populatedRide });
@@ -74,6 +101,16 @@ router.post("/:id/accept", authenticate, requireRole("driver"), async (req, res)
 // Decline a ride
 router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    const buffer = await BookingBuffer.findOne({
+      rideId: req.params.id,
+      status: "distributing",
+      "currentCandidate.driverId": req.user.id,
+    });
+    if (buffer) {
+      await bookingDistributor.declineOffer(buffer._id, req.user.id);
+      return res.json({ message: "Ride declined" });
+    }
+
     const ride = await Ride.findById(req.params.id);
     if (!ride) return res.status(404).json({ message: "Ride not found." });
 
@@ -81,6 +118,9 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
       return res.status(400).json({ message: "Ride is no longer pending." });
     }
 
+    if (ride.currentCandidateDriverId?.toString() === req.user.id.toString()) {
+      ride.currentCandidateDriverId = null;
+    }
     ride.ignoredDrivers.push(req.user.id);
     await ride.save();
 
@@ -93,9 +133,12 @@ router.post("/:id/decline", authenticate, requireRole("driver"), async (req, res
   }
 });
 
+const { validateCancellation, recordStrikeAndEvaluate } = require("../../services/strikes");
+
 // Cancel a ride (by driver)
 router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res) => {
   try {
+    const { reason, forceStandardCancel } = req.body;
     const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
     
     if (!ride) {
@@ -110,10 +153,27 @@ router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res)
       return res.status(400).json({ message: "Cannot cancel a ride that has already started." });
     }
 
+    // Strike evaluation
+    const validation = await validateCancellation(ride, "driver", reason, forceStandardCancel);
+    if (!validation.valid) {
+      if (validation.errorCode) {
+        return res.status(400).json({ code: validation.errorCode, message: validation.error });
+      }
+      return res.status(400).json({ message: validation.error });
+    }
+
+    if (!ride.cancellationData) ride.cancellationData = {};
+    ride.cancellationData.cancelledBy = "driver";
+    ride.cancellationData.reason = reason || null;
+
     ride.status = "cancelled";
     await ride.save();
 
-    broadcastToRide(ride._id, "ride_cancelled", { reason: "The driver has cancelled the ride." });
+    if (validation.strikeType && validation.targetUserId) {
+      await recordStrikeAndEvaluate(validation.targetUserId, validation.strikeType, ride._id);
+    }
+
+    broadcastToRide(ride._id, "ride_cancelled", { reason: reason || "The driver has cancelled the ride." });
 
     // Free up driver
     await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
@@ -125,9 +185,30 @@ router.post("/:id/cancel", authenticate, requireRole("driver"), async (req, res)
   }
 });
 
+// Save initial ETA to pickup
+router.patch("/:id/eta", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const { duration } = req.body;
+    if (duration == null) return res.status(400).json({ message: "Duration is required" });
+
+    const ride = await Ride.findOne({ _id: req.params.id, driverId: req.user.id });
+    if (!ride) return res.status(404).json({ message: "Ride not found." });
+
+    if (!ride.cancellationData) ride.cancellationData = {};
+    if (ride.cancellationData.driverEtaToPickupMins == null) {
+      ride.cancellationData.driverEtaToPickupMins = duration;
+      await ride.save();
+    }
+    res.json({ message: "ETA saved" });
+  } catch (err) {
+    console.error("[driver-ride-eta]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Update ride status (arrive, start, complete)
 router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res) => {
-    const { status, latitude, longitude } = req.body;
+    const { status, latitude, longitude, discountedPassengers } = req.body;
     const validStatuses = ["arrived_pickup", "trip_started", "completed"];
 
     if (!validStatuses.includes(status)) {
@@ -142,7 +223,7 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
             return res.status(400).json({ message: "Ride is already cancelled or completed." });
         }
 
-        if ((status === "arrived_pickup" || status === "completed") && latitude !== undefined && longitude !== undefined) {
+        if (status === "arrived_pickup" || status === "completed") {
             let targetCoords;
             if (status === "arrived_pickup") {
                 targetCoords = ride.pickup.coordinates.coordinates; // [lng, lat]
@@ -150,14 +231,64 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
                 targetCoords = ride.dropoff.coordinates.coordinates;
             }
 
-            if (targetCoords && targetCoords.length === 2) {
+            // If coordinates are missing (e.g. driver lost GPS fix) or distance > 100m,
+            // we default to requiring passenger override rather than hard-blocking the ride.
+            let requiresOverride = false;
+            
+            if (latitude === undefined || longitude === undefined) {
+                requiresOverride = true;
+            } else if (targetCoords && targetCoords.length === 2) {
                 const distance = getDistanceInMeters(latitude, longitude, targetCoords[1], targetCoords[0]);
                 if (distance > 100) {
-                    broadcastToRide(ride._id, "override_request", { rideId: ride._id, status });
-                    return res.status(400).json({ code: "GPS_TOO_FAR", message: "You are too far from the location. Waiting for passenger override." });
+                    requiresOverride = true;
+                }
+            }
+
+            if (requiresOverride) {
+                // Send directly to passenger's socket
+                sendToUser(ride.passengerId, "override_request", { rideId: ride._id, status });
+                return res.status(400).json({ code: "GPS_TOO_FAR", message: "Location could not be verified or is too far. Waiting for passenger override." });
+            }
+        }
+        if (status === "arrived_pickup" && discountedPassengers !== undefined) {
+            // Re-calculate the fare based on verified driver input
+            let fareSettings = await SystemSettings.findOne({ key: "fare" });
+            if (!fareSettings) {
+                fareSettings = { baseFare: 25, perKmFare: 8.5, baseDistance: 3 };
+            }
+            
+            const pCount = ride.passengerCount || 1;
+            const dCount = Math.min(pCount, discountedPassengers);
+            const regularCount = pCount - dCount;
+            
+            const extraKm = Math.max(0, Math.ceil((ride.distanceKm || 0) - fareSettings.baseDistance));
+            const effectiveBaseFare = pCount === 1 ? fareSettings.baseFare * 2 : fareSettings.baseFare;
+            
+            const regularFarePerPerson = effectiveBaseFare + (extraKm * fareSettings.perKmFare);
+            const discountedFarePerPerson = (effectiveBaseFare * 0.8) + (extraKm * fareSettings.perKmFare * 0.8);
+            
+            const regularFareTotal = regularCount * regularFarePerPerson;
+            const discountedFareTotal = dCount * discountedFarePerPerson;
+            
+            ride.discountCount = dCount;
+            ride.fare = parseFloat((regularFareTotal + discountedFareTotal).toFixed(2));
+        }
+
+        if (status === "arrived_pickup") {
+            if (!ride.cancellationData) ride.cancellationData = {};
+            ride.cancellationData.arrivedPickupAt = new Date();
+
+            // Evaluate late arrival flag
+            if (ride.cancellationData.driverAssignedAt && ride.cancellationData.driverEtaToPickupMins) {
+                const elapsedMins = (ride.cancellationData.arrivedPickupAt.getTime() - ride.cancellationData.driverAssignedAt.getTime()) / 60000;
+                // If they took more than ETA + 20 mins (grace period), they arrived unreasonably late
+                if (elapsedMins > ride.cancellationData.driverEtaToPickupMins + 20) {
+                    const { recordStrikeAndEvaluate } = require("../../services/strikes");
+                    await recordStrikeAndEvaluate(ride.driverId, "late_arrival", ride._id);
                 }
             }
         }
+
         if (status === "trip_started") {
             ride.tripStartedAt = new Date();
         } else if (status === "completed") {
@@ -178,15 +309,44 @@ router.patch("/:id/status", authenticate, requireRole("driver"), async (req, res
       rideId: ride._id, 
       status, 
       actualDurationMins: ride.actualDurationMins, 
-      actualDistanceKm: ride.actualDistanceKm 
+      actualDistanceKm: ride.actualDistanceKm,
+      fare: ride.fare
     });
 
     if (status === "completed") {
-      // Free up driver
-      await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
+      // Driver is still viewing the dropoff summary on their screen.
+      // Keep isBusy: true so rideMatcher does not dispatch new rides while they review earnings.
+      // Add a 60-second safety timeout in case the app is killed or loses connectivity.
+      setTimeout(async () => {
+        try {
+          const ongoing = await Ride.findOne({
+            driverId: req.user.id,
+            status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+          });
+          if (!ongoing) {
+            await ActiveDriver.findOneAndUpdate({ driverId: req.user.id }, { isBusy: false });
+          }
+        } catch (timeoutErr) {
+          console.error("[driver-summary-safety-timeout-err]", timeoutErr);
+        }
+      }, 60000);
+
+      // Atomic Wallet Settlement (if paymentMethod was 'wallet')
+      if (ride.paymentMethod === "wallet") {
+        try {
+          const { settleRideWallet } = require("../../services/walletSettlement");
+          await settleRideWallet(ride, req.user.id);
+        } catch (walletErr) {
+          console.error("[wallet-settlement-error]", walletErr);
+        }
+      }
     }
 
-    res.json({ message: `Status updated to ${status}`, ride });
+    const populatedRide = await Ride.findById(ride._id)
+      .populate("driverId", "firstName lastName mobileNumber profilePicture driverDetails")
+      .populate("passengerId", "firstName lastName mobileNumber profilePicture");
+
+    res.json({ message: `Status updated to ${status}`, ride: populatedRide });
   } catch (err) {
     console.error("[driver-ride-status]", err);
     res.status(500).json({ message: "Server error" });
@@ -224,4 +384,45 @@ router.get("/earnings/daily", authenticate, requireRole("driver"), async (req, r
   }
 });
 
+// Dismiss trip summary and mark driver as available
+router.post("/:id/dismiss-summary", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    // Check if there are any other ongoing active rides
+    const ongoingRide = await Ride.findOne({
+      driverId,
+      status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+    });
+
+    if (!ongoingRide) {
+      await ActiveDriver.findOneAndUpdate({ driverId }, { isBusy: false });
+    }
+
+    res.json({ message: "Summary dismissed. Driver is now available for new rides." });
+  } catch (err) {
+    console.error("[driver-dismiss-summary]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/dismiss-summary", authenticate, requireRole("driver"), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const ongoingRide = await Ride.findOne({
+      driverId,
+      status: { $in: ["driver_assigned", "arrived_pickup", "trip_started"] }
+    });
+
+    if (!ongoingRide) {
+      await ActiveDriver.findOneAndUpdate({ driverId }, { isBusy: false });
+    }
+
+    res.json({ message: "Summary dismissed. Driver is now available for new rides." });
+  } catch (err) {
+    console.error("[driver-dismiss-summary-general]", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
+

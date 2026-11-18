@@ -1,6 +1,8 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const ActiveDriver = require("../models/ActiveDriver");
+const Ride = require("../models/Ride");
+const SupportTicket = require("../models/SupportTicket");
 
 let io;
 
@@ -11,7 +13,7 @@ const activeUsers = new Map();
 
 function init(server) {
   io = new Server(server, {
-    cors: { origin: "*" },
+    cors: { origin: ["https://finder-admin.mcreysc980.workers.dev", "https://finderadmin.pages.dev"] },
   });
 
   // ── Authentication middleware ──────────────────────────────────────────
@@ -52,33 +54,120 @@ function init(server) {
 
     // When the client opens a specific ticket's chat screen,
     // they emit "join_ticket" to start receiving real-time messages for it.
-    socket.on("join_ticket", ({ ticketId }) => {
-      socket.join(ticketId);
+    socket.on("join_ticket", async ({ ticketId }) => {
+      try {
+        if (!ticketId) return;
+        const ticket = await SupportTicket.findById(ticketId).select("userId");
+        if (!ticket) return;
+        const ownerId = ticket.userId?.toString();
+        if (socket.user.role === "admin" || userId === ownerId) {
+          socket.join(ticketId.toString());
+        } else {
+          console.warn(`[Socket] Unauthorized join_ticket attempt by user ${userId} for ticket ${ticketId}`);
+        }
+      } catch (err) {
+        console.error("[Socket] join_ticket auth error:", err);
+      }
     });
 
     // When the client leaves the chat screen (navigates away),
     // they emit "leave_ticket" to stop receiving messages for that ticket.
     socket.on("leave_ticket", ({ ticketId }) => {
-      socket.leave(ticketId);
+      if (ticketId) socket.leave(ticketId.toString());
     });
 
     // ── Rides ──────────────────────────────────────────────────────────────
     // When a passenger or driver opens a ride screen, they join the ride room
-    socket.on("join_ride", ({ rideId }) => {
-      console.log(`[Socket] User ${userId} joining ride room: ${rideId}`);
-      socket.join(rideId);
+    socket.on("join_ride", async ({ rideId }) => {
+      try {
+        if (!rideId) return;
+        const ride = await Ride.findById(rideId).select("passengerId driverId currentCandidateDriverId");
+        if (!ride) return;
+        const passengerId = ride.passengerId?.toString();
+        const driverId = ride.driverId?.toString();
+        const candidateId = ride.currentCandidateDriverId?.toString();
+        if (
+          socket.user.role === "admin" ||
+          userId === passengerId ||
+          userId === driverId ||
+          userId === candidateId
+        ) {
+          console.log(`[Socket] User ${userId} joining ride room: ${rideId}`);
+          socket.join(rideId.toString());
+        } else {
+          console.warn(`[Socket] Unauthorized join_ride attempt by user ${userId} for ride ${rideId}`);
+        }
+      } catch (err) {
+        console.error("[Socket] join_ride auth error:", err);
+      }
     });
 
     socket.on("leave_ride", ({ rideId }) => {
-      socket.leave(rideId);
+      if (rideId) socket.leave(rideId.toString());
     });
 
+    // ── WebRTC Signaling ───────────────────────────────────────────────────
+    socket.on("webrtc_call_initiated", async ({ rideId, callerName, isVideo }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      // Record communication for strike system
+      try {
+        const role = socket.user.role;
+        const updateField = role === 'passenger' 
+          ? { 'cancellationData.lastPassengerCommunicationAt': new Date() }
+          : { 'cancellationData.lastDriverCommunicationAt': new Date() };
+        await Ride.updateOne({ _id: rideId }, { $set: updateField });
+      } catch (err) {
+        console.error("Failed to update call timestamp", err);
+      }
 
+      // Broadcast to the other party in the ride room
+      socket.to(rideId.toString()).emit("webrtc_call_initiated", { callerName, isVideo, rideId });
+    });
+
+    socket.on("webrtc_call_accepted", ({ rideId }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_call_accepted");
+    });
+
+    socket.on("webrtc_call_denied", ({ rideId }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_call_denied");
+    });
+
+    socket.on("webrtc_offer", ({ rideId, offer }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_offer", offer);
+    });
+
+    socket.on("webrtc_answer", ({ rideId, answer }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_answer", answer);
+    });
+
+    socket.on("webrtc_ice_candidate", ({ rideId, candidate }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_ice_candidate", candidate);
+    });
+
+    socket.on("webrtc_end_call", ({ rideId }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_end_call");
+    });
+
+    socket.on("webrtc_video_toggled", ({ rideId, isVideoOn }) => {
+      if (!rideId || !socket.rooms.has(rideId.toString())) return;
+      socket.to(rideId.toString()).emit("webrtc_video_toggled", { isVideoOn });
+    });
 
     // Driver sends their location during an active trip
-    socket.on("driver_location_update", ({ rideId, location }) => {
+    socket.on("driver_location_update", ({ rideId, location, duration }) => {
+      if (socket.user.role !== "driver") return;
+      if (!rideId) return;
+      if (!socket.rooms.has(rideId.toString())) {
+        socket.join(rideId.toString());
+      }
       // Broadcast this location update to anyone else in the ride room (the passenger)
-      broadcastToRide(rideId, "driver_location_update", location);
+      broadcastToRide(rideId, "driver_location_update", { location, duration });
     });
 
     // Clean up when the socket disconnects (e.g. user closes the app)
